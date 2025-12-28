@@ -7,7 +7,7 @@ import SchoolSidebar from '../components/SchoolSidebar';
 import SchoolHome from './school/SchoolHome';
 import SchoolResourceManagement from './school/SchoolResourceManagement';
 import SchoolResourcesHome from './school/SchoolResourcesHome';
-import SchoolViewResources from './school/SchoolResourceCategory';
+import SchoolResourceCategory from './school/SchoolResourceCategory';
 import SchoolMyUploads from './school/SchoolMyUploads';
 import SchoolCommunicationCentre from './school/SchoolCommunicationCentre';
 import SchoolAnnouncements from './school/SchoolAnnouncements';
@@ -109,12 +109,12 @@ const SchoolDashboard = ({ user, setUser }) => {
             {/* Resource Management */}
             <Route path="/resources" element={<SchoolResourceManagement />}>
               <Route index element={<SchoolResourcesHome />} />
-              <Route path="academic" element={<SchoolViewResources user={user} />} />
-              <Route path="marketing" element={<SchoolViewResources user={user} />} />
-              <Route path="administrative" element={<SchoolViewResources user={user} />} />
-              <Route path="training" element={<SchoolViewResources user={user} />} />
-              <Route path="event" element={<SchoolViewResources user={user} />} />
-              <Route path="multimedia" element={<SchoolViewResources user={user} />} />
+              <Route path="academic" element={<SchoolResourceCategory user={user} />} />
+              <Route path="marketing" element={<SchoolResourceCategory user={user} />} />
+              <Route path="administrative" element={<SchoolResourceCategory user={user} />} />
+              <Route path="training" element={<SchoolResourceCategory user={user} />} />
+              <Route path="event" element={<SchoolResourceCategory user={user} />} />
+              <Route path="multimedia" element={<SchoolResourceCategory user={user} />} />
               <Route path="my-uploads" element={<SchoolMyUploads user={user} />} />
             </Route>
             

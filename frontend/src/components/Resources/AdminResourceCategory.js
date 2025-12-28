@@ -31,7 +31,9 @@ const AdminResourceCategory = ({ category, title, description }) => {
   const [searchText, setSearchText] = useState('');
   const [selectedClass, setSelectedClass] = useState('all');
   const [viewMode, setViewMode] = useState('list');
+  
   const iframeRef = useRef(null);
+  const videoRefs = useRef({});
 
   useEffect(() => {
     fetchResources();
@@ -135,7 +137,7 @@ const AdminResourceCategory = ({ category, title, description }) => {
 
   const updateResourceStatus = async (resourceId, status) => {
     try {
-      await axios.patch(`${API}/admin/resources/${resourceId}/status`, { status });
+      await axios.put(`${API}/admin/resources/${resourceId}/${status === 'approved' ? 'approve' : 'reject'}`);
       message.success(`Resource ${status} successfully`);
       fetchResources();
     } catch (error) {
@@ -261,6 +263,12 @@ const AdminResourceCategory = ({ category, title, description }) => {
     setPreviewResource(record);
     setPreviewLoading(true);
     setIsPreviewModalVisible(true);
+
+    // Reset any existing video playback
+    if (videoRefs.current[record.resource_id]) {
+      videoRefs.current[record.resource_id].pause();
+      videoRefs.current[record.resource_id].currentTime = 0;
+    }
   };
 
   const renderPreview = () => {
@@ -275,10 +283,18 @@ const AdminResourceCategory = ({ category, title, description }) => {
       );
     }
 
-    const fileUrl = previewResource.file_path;
     const fileType = previewResource.file_type ? previewResource.file_type.toLowerCase() : '';
     const fileName = previewResource.file_path ? previewResource.file_path.split('/').pop() : '';
     const fileExtension = fileName ? fileName.split('.').pop().toLowerCase() : '';
+
+    // Generate proper preview URL
+    const getPreviewUrl = () => {
+      const previewUrl = `${API}/resources/${previewResource.resource_id}/preview`;
+      console.log('Using preview URL:', previewUrl);
+      return previewUrl;
+    };
+
+    const previewUrl = getPreviewUrl();
 
     // Check for PDF
     if (fileType.includes('pdf') || fileExtension === 'pdf') {
@@ -286,7 +302,7 @@ const AdminResourceCategory = ({ category, title, description }) => {
         <div style={{ width: '100%', height: '600px', overflow: 'hidden' }}>
           <iframe
             ref={iframeRef}
-            src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+            src={previewUrl}
             style={{
               width: '100%',
               height: '100%',
@@ -294,10 +310,14 @@ const AdminResourceCategory = ({ category, title, description }) => {
               borderRadius: '8px'
             }}
             title={previewResource.name}
-            onLoad={() => setPreviewLoading(false)}
-            onError={() => {
+            onLoad={() => {
+              console.log('PDF iframe loaded successfully');
               setPreviewLoading(false);
-              message.error('Failed to load PDF preview');
+            }}
+            onError={(e) => {
+              console.error('PDF iframe error:', e);
+              setPreviewLoading(false);
+              message.error('Failed to load PDF preview. Try downloading instead.');
             }}
           />
         </div>
@@ -310,7 +330,7 @@ const AdminResourceCategory = ({ category, title, description }) => {
       return (
         <div style={{ textAlign: 'center', maxHeight: '600px', overflow: 'auto' }}>
           <img
-            src={fileUrl}
+            src={previewUrl}
             alt={previewResource.name}
             style={{
               maxWidth: '100%',
@@ -318,14 +338,20 @@ const AdminResourceCategory = ({ category, title, description }) => {
               objectFit: 'contain',
               borderRadius: '8px'
             }}
-            onLoad={() => setPreviewLoading(false)}
-            onError={(e) => {
+            onLoad={() => {
+              console.log('Image loaded successfully');
               setPreviewLoading(false);
+            }}
+            onError={(e) => {
               console.error('Image load error:', e);
-              // Try alternative URL format
-              const altUrl = `${API}/resources/${previewResource.resource_id}/preview`;
-              e.target.src = altUrl;
-              message.info('Trying alternative preview method...');
+              setPreviewLoading(false);
+              // Fallback to direct file path
+              if (previewResource.file_path && previewResource.file_path.startsWith('http')) {
+                e.target.src = previewResource.file_path;
+                message.info('Trying alternative source...');
+              } else {
+                message.error('Failed to load image preview');
+              }
             }}
           />
         </div>
@@ -333,46 +359,45 @@ const AdminResourceCategory = ({ category, title, description }) => {
     }
 
     // Check for videos
-    const [videoRefs] = useState({});
-// In your renderPreview function, update the video player part:
-if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(fileExtension)) {
-  return (
-    <div style={{ textAlign: 'center', maxHeight: '600px', overflow: 'auto' }}>
-      <video
-        ref={el => {
-          if (el && previewResource) {
-            videoRefs[previewResource.resource_id] = el;
-          }
-        }}
-        controls
-        autoPlay
-        style={{
-          width: '100%',
-          maxHeight: '600px',
-          borderRadius: '8px'
-        }}
-        onPlay={() => {
-          // Pause all other videos when one starts playing
-          Object.keys(videoRefs).forEach(key => {
-            if (key !== previewResource?.resource_id && videoRefs[key]) {
-              videoRefs[key].pause();
-            }
-          });
-        }}
-        onPause={(e) => {
-          // Don't reset the time if it's the end of the video
-          if (e.target.ended) {
-            return;
-          }
-          e.target.currentTime = 0;
-        }}
-      >
-        <source src={fileUrl} type={previewResource.file_type || 'video/mp4'} />
-        Your browser does not support the video tag.
-      </video>
-    </div>
-  );
-}
+    if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(fileExtension)) {
+      return (
+        <div style={{ textAlign: 'center', maxHeight: '600px', overflow: 'auto' }}>
+          <video
+            ref={el => {
+              if (el && previewResource) {
+                videoRefs.current[previewResource.resource_id] = el;
+              }
+            }}
+            controls
+            autoPlay
+            style={{
+              width: '100%',
+              maxHeight: '600px',
+              borderRadius: '8px'
+            }}
+            onLoadedData={() => {
+              console.log('Video loaded successfully');
+              setPreviewLoading(false);
+            }}
+            onError={() => {
+              setPreviewLoading(false);
+              message.error('Failed to load video preview');
+            }}
+            onPlay={() => {
+              // Pause all other videos when one starts playing
+              Object.keys(videoRefs.current).forEach(key => {
+                if (key !== previewResource?.resource_id && videoRefs.current[key]) {
+                  videoRefs.current[key].pause();
+                }
+              });
+            }}
+          >
+            <source src={previewUrl} type={previewResource.file_type || 'video/mp4'} />
+            Your browser does not support the video tag.
+          </video>
+        </div>
+      );
+    }
 
     // Check for audio
     const audioExtensions = ['mp3', 'wav', 'ogg', 'm4a', 'flac'];
@@ -389,18 +414,16 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
               message.error('Failed to load audio preview');
             }}
           >
-            <source src={fileUrl} type={previewResource.file_type || 'audio/mp3'} />
+            <source src={previewUrl} type={previewResource.file_type || 'audio/mp3'} />
             Your browser does not support the audio element.
           </audio>
         </div>
       );
     }
 
-    // For documents (Word, Excel, PowerPoint) - try preview endpoint
+    // For documents (Word, Excel, PowerPoint)
     const docExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'];
     if (docExtensions.includes(fileExtension)) {
-      const previewUrl = `${API}/resources/${previewResource.resource_id}/preview`;
-      
       return (
         <div style={{ width: '100%', height: '600px', overflow: 'hidden' }}>
           <iframe
@@ -416,7 +439,7 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
             onError={() => {
               setPreviewLoading(false);
               // Fallback to Google Docs viewer
-              const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(fileUrl)}&embedded=true`;
+              const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(previewUrl)}&embedded=true`;
               iframeRef.current.src = googleDocsViewerUrl;
             }}
           />
@@ -425,13 +448,12 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
     }
 
     // Default fallback for unsupported file types
-    setPreviewLoading(false);
     return (
       <div style={{ textAlign: 'center', padding: '40px' }}>
         {getFileIcon(previewResource.file_type, 64)}
         <h3 style={{ marginTop: '16px' }}>{previewResource.name}</h3>
         <p style={{ color: '#666', marginBottom: '24px' }}>
-          Online preview not available for this file type
+          Preview not available for this file type. Please download to view.
         </p>
         <Button
           type="primary"
@@ -449,7 +471,6 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
     const fileUrl = resource.file_path;
     const fileType = resource.file_type?.toLowerCase() || '';
     const fileExtension = fileUrl?.split('.').pop()?.toLowerCase() || '';
-
 
     // For PDFs - show first page as thumbnail
     if (fileType.includes('pdf') || fileExtension === 'pdf') {
@@ -528,57 +549,57 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
 
     // For videos
     if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(fileExtension)) {
-    return (
-      <div style={{ 
-        position: 'relative', 
-        width: '100%', 
-        height: '150px',
-        backgroundColor: '#000',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden'
-      }}>
-        <video
-          muted
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-            opacity: 0.7
-          }}
-          onMouseEnter={(e) => {
-            // Mute and play the video on hover
-            e.target.muted = true;
-            e.target.play().catch(e => console.log('Video play error:', e));
-          }}
-          onMouseLeave={(e) => {
-            // Pause and reset the video when mouse leaves
-            e.target.pause();
-            e.target.currentTime = 0;
-          }}
-        >
-          <source src={fileUrl} type={resource.file_type || 'video/mp4'} />
-        </video>
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          background: 'rgba(0,0,0,0.5)',
-          borderRadius: '50%',
-          width: '48px',
-          height: '48px',
+      return (
+        <div style={{ 
+          position: 'relative', 
+          width: '100%', 
+          height: '150px',
+          backgroundColor: '#000',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          pointerEvents: 'none' // Make sure clicks go through to the video
+          overflow: 'hidden'
         }}>
-          <VideoCameraOutlined style={{ fontSize: '24px', color: 'white' }} />
+          <video
+            muted
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              opacity: 0.7
+            }}
+            onMouseEnter={(e) => {
+              // Mute and play the video on hover
+              e.target.muted = true;
+              e.target.play().catch(e => console.log('Video play error:', e));
+            }}
+            onMouseLeave={(e) => {
+              // Pause and reset the video when mouse leaves
+              e.target.pause();
+              e.target.currentTime = 0;
+            }}
+          >
+            <source src={fileUrl} type={resource.file_type || 'video/mp4'} />
+          </video>
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            background: 'rgba(0,0,0,0.5)',
+            borderRadius: '50%',
+            width: '48px',
+            height: '48px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none' // Make sure clicks go through to the video
+          }}>
+            <VideoCameraOutlined style={{ fontSize: '24px', color: 'white' }} />
+          </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
     // Default thumbnail for other file types
     return (
@@ -659,7 +680,7 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
       resource.description?.toLowerCase().includes(searchText.toLowerCase()) ||
       resource.tags?.toLowerCase().includes(searchText.toLowerCase());
     const matchesClass = selectedClass === 'all' || resource.class_level === selectedClass;
-    const matchesStatus = statusFilter === 'all' || resource.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || resource.approval_status === statusFilter;
     return matchesSearch && matchesClass && matchesStatus;
   });
 
@@ -688,13 +709,13 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
                   {text}
                 </span>
               </Tooltip>
-              {record.uploaded_by_school && (
+              {record.uploaded_by_type === 'school' && (
                 <Tag color="blue" style={{ marginLeft: 8 }}>School Upload</Tag>
               )}
             </div>
-            {record.uploaded_by_school && (
+            {record.uploaded_by_type === 'school' && (
               <div style={{ fontSize: '12px', color: '#666' }}>
-                School: {record.school_name || 'N/A'}
+                School: {record.uploaded_by_name || 'N/A'}
               </div>
             )}
           </div>
@@ -704,8 +725,8 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
     },
     {
       title: 'Status',
-      dataIndex: 'status',
-      key: 'status',
+      dataIndex: 'approval_status',
+      key: 'approval_status',
       render: (status) => getStatusTag(status),
       width: '10%',
       filters: [
@@ -713,7 +734,7 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
         { text: 'Approved', value: 'approved' },
         { text: 'Rejected', value: 'rejected' },
       ],
-      onFilter: (value, record) => record.status === value,
+      onFilter: (value, record) => record.approval_status === value,
     },
     {
       title: 'Description',
@@ -775,7 +796,7 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
               onClick={() => handleDownload(record)}
             />
           </Tooltip>
-          {record.uploaded_by_school && record.status === 'pending' && (
+          {record.uploaded_by_type === 'school' && record.approval_status === 'pending' && (
             <>
               <Tooltip title="Approve">
                 <Button
@@ -813,7 +834,7 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
           </Tooltip>
         </Space>
       ),
-      width: record => record.uploaded_by_school ? '15%' : '10%',
+      width: record => record.uploaded_by_type === 'school' ? '15%' : '10%',
     },
   ];
 
@@ -1130,7 +1151,7 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
         </Form>
       </Modal>
 
-      {/* Preview Modal */}
+      {/* Preview Modal - UPDATED FOR FULL SCREEN */}
       <Modal
         title={
           <div>
@@ -1145,10 +1166,10 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
         }
         open={isPreviewModalVisible}
         onCancel={() => {
-           if (previewResource?.file_type?.includes('video') && videoRefs[previewResource.resource_id]) {
-             videoRefs[previewResource.resource_id].pause();
-             videoRefs[previewResource.resource_id].currentTime = 0;
-       }
+          // Pause video if playing
+          if (previewResource?.file_type?.includes('video') && videoRefs.current[previewResource.resource_id]) {
+            videoRefs.current[previewResource.resource_id].pause();
+          }
           setIsPreviewModalVisible(false);
           setPreviewResource(null);
           setPreviewLoading(false);
@@ -1170,16 +1191,21 @@ if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].in
             icon={<DownloadOutlined />}
             onClick={() => {
               handleDownload(previewResource);
-              setIsPreviewModalVisible(false);
-              setPreviewResource(null);
-              setPreviewLoading(false);
             }}
           >
             Download
           </Button>
         ]}
-        width={900}
+        width="90%"
         style={{ top: 20 }}
+        bodyStyle={{ 
+          padding: 0, 
+          height: '70vh', 
+          overflow: 'auto',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}
         destroyOnClose
       >
         {renderPreview()}

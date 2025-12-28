@@ -33,7 +33,9 @@ const SchoolResourceCategory = ({ user }) => {
   const [selectedClass, setSelectedClass] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [viewMode, setViewMode] = useState('list');
+  
   const iframeRef = useRef(null);
+  const videoRefs = useRef({});
   
   // Get category titles and descriptions
   const getCategoryInfo = () => {
@@ -69,18 +71,21 @@ const SchoolResourceCategory = ({ user }) => {
   const categoryInfo = getCategoryInfo();
 
   useEffect(() => {
+    console.log(`Category changed to: ${category}`);
     fetchResources();
-  }, [category]);
+  }, [category, user.school_id]);
 
   const fetchResources = async () => {
     setLoading(true);
     try {
+      console.log(`Fetching resources for category: ${category}, school_id: ${user.school_id}`);
       const response = await axios.get(`${API}/school/resources`, {
         params: {
           category: category,
           school_id: user.school_id
         }
       });
+      console.log(`API Response for ${category}:`, response.data.length, 'resources');
       
       // Format resources with proper URLs and mark school's own uploads
       const formattedResources = response.data.map((resource, index) => {
@@ -115,8 +120,12 @@ const SchoolResourceCategory = ({ user }) => {
         };
       });
       
-      console.log(`Fetched ${formattedResources.length} resources for category: ${category}`);
-      console.log('Sample resource:', formattedResources[0]);
+      console.log(`Formatted ${formattedResources.length} resources for category: ${category}`);
+      // Log the categories of fetched resources to verify filtering
+      formattedResources.forEach(res => {
+        console.log(`Resource: ${res.name}, Category: ${res.category}, IsOwn: ${res.is_own_upload}`);
+      });
+      
       setResources(formattedResources);
     } catch (error) {
       console.error('Error fetching resources:', error);
@@ -279,6 +288,12 @@ const SchoolResourceCategory = ({ user }) => {
     setPreviewResource(record);
     setPreviewLoading(true);
     setIsPreviewModalVisible(true);
+
+    // Reset any existing video playback
+    if (videoRefs.current[record.resource_id]) {
+      videoRefs.current[record.resource_id].pause();
+      videoRefs.current[record.resource_id].currentTime = 0;
+    }
   };
 
   const renderPreview = () => {
@@ -293,10 +308,19 @@ const SchoolResourceCategory = ({ user }) => {
       );
     }
 
-    const fileUrl = previewResource.file_path;
     const fileType = previewResource.file_type ? previewResource.file_type.toLowerCase() : '';
     const fileName = previewResource.file_path ? previewResource.file_path.split('/').pop() : '';
     const fileExtension = fileName ? fileName.split('.').pop().toLowerCase() : '';
+
+    // Generate proper preview URL - FIXED APPROACH
+    const getPreviewUrl = () => {
+      // Always use the API preview endpoint for consistency
+      const previewUrl = `${API}/resources/${previewResource.resource_id}/preview`;
+      console.log('Using preview URL:', previewUrl);
+      return previewUrl;
+    };
+
+    const previewUrl = getPreviewUrl();
 
     // Check for PDF
     if (fileType.includes('pdf') || fileExtension === 'pdf') {
@@ -304,7 +328,7 @@ const SchoolResourceCategory = ({ user }) => {
         <div style={{ width: '100%', height: '600px', overflow: 'hidden' }}>
           <iframe
             ref={iframeRef}
-            src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+            src={previewUrl}
             style={{
               width: '100%',
               height: '100%',
@@ -312,10 +336,14 @@ const SchoolResourceCategory = ({ user }) => {
               borderRadius: '8px'
             }}
             title={previewResource.name}
-            onLoad={() => setPreviewLoading(false)}
-            onError={() => {
+            onLoad={() => {
+              console.log('PDF iframe loaded successfully');
               setPreviewLoading(false);
-              message.error('Failed to load PDF preview');
+            }}
+            onError={(e) => {
+              console.error('PDF iframe error:', e);
+              setPreviewLoading(false);
+              message.error('Failed to load PDF preview. Try downloading instead.');
             }}
           />
         </div>
@@ -328,7 +356,7 @@ const SchoolResourceCategory = ({ user }) => {
       return (
         <div style={{ textAlign: 'center', maxHeight: '600px', overflow: 'auto' }}>
           <img
-            src={fileUrl}
+            src={previewUrl}
             alt={previewResource.name}
             style={{
               maxWidth: '100%',
@@ -336,14 +364,20 @@ const SchoolResourceCategory = ({ user }) => {
               objectFit: 'contain',
               borderRadius: '8px'
             }}
-            onLoad={() => setPreviewLoading(false)}
-            onError={(e) => {
+            onLoad={() => {
+              console.log('Image loaded successfully');
               setPreviewLoading(false);
+            }}
+            onError={(e) => {
               console.error('Image load error:', e);
-              // Try alternative URL format
-              const altUrl = `${API}/resources/${previewResource.resource_id}/preview`;
-              e.target.src = altUrl;
-              message.info('Trying alternative preview method...');
+              setPreviewLoading(false);
+              // Fallback to direct file path
+              if (previewResource.file_path && previewResource.file_path.startsWith('http')) {
+                e.target.src = previewResource.file_path;
+                message.info('Trying alternative source...');
+              } else {
+                message.error('Failed to load image preview');
+              }
             }}
           />
         </div>
@@ -355,6 +389,11 @@ const SchoolResourceCategory = ({ user }) => {
       return (
         <div style={{ textAlign: 'center', maxHeight: '600px', overflow: 'auto' }}>
           <video
+            ref={el => {
+              if (el && previewResource) {
+                videoRefs.current[previewResource.resource_id] = el;
+              }
+            }}
             controls
             autoPlay
             style={{
@@ -362,13 +401,24 @@ const SchoolResourceCategory = ({ user }) => {
               maxHeight: '600px',
               borderRadius: '8px'
             }}
-            onLoadedData={() => setPreviewLoading(false)}
+            onLoadedData={() => {
+              console.log('Video loaded successfully');
+              setPreviewLoading(false);
+            }}
             onError={() => {
               setPreviewLoading(false);
               message.error('Failed to load video preview');
             }}
+            onPlay={() => {
+              // Pause all other videos when one starts playing
+              Object.keys(videoRefs.current).forEach(key => {
+                if (key !== previewResource?.resource_id && videoRefs.current[key]) {
+                  videoRefs.current[key].pause();
+                }
+              });
+            }}
           >
-            <source src={fileUrl} type={previewResource.file_type || 'video/mp4'} />
+            <source src={previewUrl} type={previewResource.file_type || 'video/mp4'} />
             Your browser does not support the video tag.
           </video>
         </div>
@@ -390,18 +440,16 @@ const SchoolResourceCategory = ({ user }) => {
               message.error('Failed to load audio preview');
             }}
           >
-            <source src={fileUrl} type={previewResource.file_type || 'audio/mp3'} />
+            <source src={previewUrl} type={previewResource.file_type || 'audio/mp3'} />
             Your browser does not support the audio element.
           </audio>
         </div>
       );
     }
 
-    // For documents (Word, Excel, PowerPoint) - try preview endpoint
+    // For documents (Word, Excel, PowerPoint)
     const docExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'];
     if (docExtensions.includes(fileExtension)) {
-      const previewUrl = `${API}/resources/${previewResource.resource_id}/preview`;
-      
       return (
         <div style={{ width: '100%', height: '600px', overflow: 'hidden' }}>
           <iframe
@@ -417,7 +465,7 @@ const SchoolResourceCategory = ({ user }) => {
             onError={() => {
               setPreviewLoading(false);
               // Fallback to Google Docs viewer
-              const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(fileUrl)}&embedded=true`;
+              const googleDocsViewerUrl = `https://docs.google.com/viewer?url=${encodeURIComponent(previewUrl)}&embedded=true`;
               if (iframeRef.current) {
                 iframeRef.current.src = googleDocsViewerUrl;
               }
@@ -428,13 +476,12 @@ const SchoolResourceCategory = ({ user }) => {
     }
 
     // Default fallback for unsupported file types
-    setPreviewLoading(false);
     return (
       <div style={{ textAlign: 'center', padding: '40px' }}>
         {getFileIcon(previewResource.file_type, 64)}
         <h3 style={{ marginTop: '16px' }}>{previewResource.name}</h3>
         <p style={{ color: '#666', marginBottom: '24px' }}>
-          Online preview not available for this file type
+          Preview not available for this file type. Please download to view.
         </p>
         <Button
           type="primary"
@@ -1052,7 +1099,7 @@ const SchoolResourceCategory = ({ user }) => {
         </Form>
       </Modal>
 
-      {/* Preview Modal */}
+      {/* Preview Modal - UPDATED FOR FULL SCREEN */}
       <Modal
         title={
           <div>
@@ -1067,6 +1114,10 @@ const SchoolResourceCategory = ({ user }) => {
         }
         open={isPreviewModalVisible}
         onCancel={() => {
+          // Pause video if playing
+          if (previewResource?.file_type?.includes('video') && videoRefs.current[previewResource.resource_id]) {
+            videoRefs.current[previewResource.resource_id].pause();
+          }
           setIsPreviewModalVisible(false);
           setPreviewResource(null);
           setPreviewLoading(false);
@@ -1088,17 +1139,22 @@ const SchoolResourceCategory = ({ user }) => {
             icon={<DownloadOutlined />}
             onClick={() => {
               handleDownload(previewResource);
-              setIsPreviewModalVisible(false);
-              setPreviewResource(null);
-              setPreviewLoading(false);
             }}
             disabled={previewResource?.is_own_upload && previewResource?.display_status !== 'approved'}
           >
             Download
           </Button>
         ]}
-        width={900}
+        width="90%"
         style={{ top: 20 }}
+        bodyStyle={{ 
+          padding: 0, 
+          height: '70vh', 
+          overflow: 'auto',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center'
+        }}
         destroyOnClose
       >
         {renderPreview()}
