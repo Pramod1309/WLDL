@@ -1,0 +1,466 @@
+import React, { useState, useEffect } from 'react';
+import { Layout, Button, theme } from 'antd';
+import { MenuUnfoldOutlined, MenuFoldOutlined, LogoutOutlined } from '@ant-design/icons';
+import { Routes, Route, useLocation, Navigate, Outlet } from 'react-router-dom';
+import axios from 'axios';
+import Sidebar from '../components/Sidebar';
+import DashboardHome from './DashboardHome';
+
+// Resource Management
+import ResourceManagement from '../components/Resources/ResourceManagement';
+import ResourcesHome from '../components/Resources/ResourcesHome';
+import AcademicResources from '../components/Resources/AcademicResources';
+import MarketingResources from '../components/Resources/MarketingResources';
+import AdministrativeResources from '../components/Resources/AdministrativeResources';
+import TrainingResources from '../components/Resources/TrainingResources';
+import EventResources from '../components/Resources/EventResources';
+import MultimediaCollection from '../components/Resources/MultimediaCollection';
+
+// Analytics
+import SchoolActivity from '../components/Analytics/SchoolActivity';
+import ResourceAnalytics from '../components/Analytics/ResourceAnalytics';
+
+// Communication
+import Announcements from '../components/Communication/Announcements';
+import Chat from '../components/Communication/Chat';
+import AdminChat from '../components/Communication/AdminChat';
+
+// Support
+import SupportTickets from '../components/Support/SupportTickets';
+import KnowledgeBase from '../components/Support/KnowledgeBase';
+
+// Settings
+import AdminProfile from '../components/Settings/AdminProfile';
+import Branding from '../components/Settings/Branding';
+import ContentManagement from '../components/Settings/ContentManagement';
+import AdminUsers from '../components/Settings/AdminUsers';
+import Security from '../components/Settings/Security';
+import DataBackup from '../components/Settings/DataBackup';
+
+import '../styles/AdminDashboard.css';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${BACKEND_URL}/api`;
+
+const { Header, Content } = Layout;
+
+const AdminDashboard = ({ user, setUser }) => {
+  const [collapsed, setCollapsed] = useState(false);
+  const [schools, setSchools] = useState([]);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [editingSchool, setEditingSchool] = useState(null);
+  const [formData, setFormData] = useState({
+    school_id: '',
+    school_name: '',
+    email: '',
+    password: '',
+    logo: null
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const {
+    token: { colorBgContainer, borderRadiusLG },
+  } = theme.useToken();
+
+  const location = useLocation();
+
+  useEffect(() => {
+    fetchSchools();
+  }, []);
+
+  const fetchSchools = async () => {
+    try {
+      const response = await axios.get(`${API}/admin/schools`);
+      setSchools(response.data);
+    } catch (err) {
+      console.error('Error fetching schools:', err);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
+    window.location.href = '/';
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleFileChange = (e) => {
+    setFormData(prev => ({ ...prev, logo: e.target.files[0] }));
+  };
+
+  const handleAddSchool = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const formDataToSend = new FormData();
+      formDataToSend.append('school_id', formData.school_id);
+      formDataToSend.append('school_name', formData.school_name);
+      formDataToSend.append('email', formData.email);
+      formDataToSend.append('password', formData.password);
+      if (formData.logo) {
+        formDataToSend.append('logo', formData.logo);
+      }
+
+      await axios.post(`${API}/admin/schools`, formDataToSend, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      setShowAddModal(false);
+      setFormData({
+        school_id: '',
+        school_name: '',
+        email: '',
+        password: '',
+        logo: null
+      });
+      fetchSchools();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to add school');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateSchool = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const formDataToSend = new FormData();
+      if (formData.school_name) formDataToSend.append('school_name', formData.school_name);
+      if (formData.email) formDataToSend.append('email', formData.email);
+      if (formData.password) formDataToSend.append('password', formData.password);
+      if (formData.logo) formDataToSend.append('logo', formData.logo);
+
+      await axios.put(`${API}/admin/schools/${editingSchool.school_id}`, formDataToSend, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      setEditingSchool(null);
+      setFormData({
+        school_id: '',
+        school_name: '',
+        email: '',
+        password: '',
+        logo: null
+      });
+      fetchSchools();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Failed to update school');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteSchool = async (schoolId) => {
+    if (!window.confirm('Are you sure you want to delete this school? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${API}/admin/schools/${schoolId}`);
+      fetchSchools();
+    } catch (err) {
+      alert('Failed to delete school');
+    }
+  };
+
+  const openEditModal = (school) => {
+    setEditingSchool(school);
+    setFormData({
+      school_id: school.school_id,
+      school_name: school.school_name,
+      email: school.email,
+      password: '',
+      logo: null
+    });
+  };
+
+  const renderSchoolManagement = () => (
+    <div className="admin-content">
+      <div className="content-header">
+        <h2>School Management</h2>
+        <Button type="primary" onClick={() => setShowAddModal(true)}>
+          Add New School
+        </Button>
+      </div>
+      
+      <div className="schools-grid" data-testid="schools-grid">
+        {schools.map((school) => {
+          console.log('Rendering school:', school.school_name);
+          console.log('Logo path:', school.logo_path);
+          console.log('Full URL:', `${BACKEND_URL}${school.logo_path}`);
+          
+          return (
+            <div key={school.id} className="school-folder" data-testid={`school-folder-${school.school_id}`}>
+              <div className="folder-icon">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
+                </svg>
+              </div>
+              <div className="folder-content">
+                <div className="folder-header">
+                  <span className="folder-id" data-testid={`school-id-${school.school_id}`}>#{school.school_id}</span>
+                </div>
+                {school.logo_path ? (
+                  <img 
+                    src={`${BACKEND_URL}/api${school.logo_path}`} 
+                    alt={school.school_name} 
+                    className="school-logo"
+                    data-testid={`school-logo-${school.school_id}`}
+                    style={{ display: 'block' }}
+                    onLoad={(e) => console.log('Image loaded:', e.target.src)}
+                    onError={(e) => console.error('Image failed to load:', e.target.src)}
+                  />
+                ) : (
+                  <div className="school-logo-placeholder" style={{ display: 'flex' }}>
+                    <UserOutlined />
+                  </div>
+                )}
+                <h3 className="school-name" data-testid={`school-name-${school.school_id}`}>{school.school_name}</h3>
+                <p className="school-email" data-testid={`school-email-${school.school_id}`}>{school.email}</p>
+                <div className="folder-actions">
+                  <button onClick={() => openEditModal(school)} className="edit-btn" data-testid={`edit-btn-${school.school_id}`}>Edit</button>
+                  <button onClick={() => handleDeleteSchool(school.school_id)} className="delete-btn" data-testid={`delete-btn-${school.school_id}`}>Delete</button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {schools.length === 0 && (
+        <div className="empty-state" data-testid="empty-schools-message">
+          <p>No schools added yet. Click "Add School" to get started.</p>
+        </div>
+      )}
+
+      {(showAddModal || editingSchool) && (
+        <div className="modal-overlay" data-testid="school-modal">
+          <div className="modal">
+            <h2 data-testid="modal-title">{editingSchool ? 'Edit School' : 'Add New School'}</h2>
+            {error && <div className="error-message" data-testid="modal-error-message">{error}</div>}
+            
+            <form onSubmit={editingSchool ? handleUpdateSchool : handleAddSchool} data-testid="school-form">
+              {!editingSchool && (
+                <div className="form-group">
+                  <label data-testid="school-id-label">School ID</label>
+                  <input
+                    type="text"
+                    name="school_id"
+                    data-testid="school-id-input"
+                    value={formData.school_id}
+                    onChange={handleInputChange}
+                    required={!editingSchool}
+                    placeholder="e.g., 1"
+                  />
+                </div>
+              )}
+
+              <div className="form-group">
+                <label data-testid="school-name-label">School Name</label>
+                <input
+                  type="text"
+                  name="school_name"
+                  data-testid="school-name-input"
+                  value={formData.school_name}
+                  onChange={handleInputChange}
+                  required={!editingSchool}
+                  placeholder="e.g., Gurukul International Preschool"
+                />
+              </div>
+
+              <div className="form-group">
+                <label data-testid="school-email-label">Email</label>
+                <input
+                  type="email"
+                  name="email"
+                  data-testid="school-email-input"
+                  value={formData.email}
+                  onChange={handleInputChange}
+                  required={!editingSchool}
+                  placeholder="school@example.com"
+                />
+              </div>
+
+              <div className="form-group">
+                <label data-testid="school-password-label">Password {editingSchool && '(leave blank to keep current)'}</label>
+                <input
+                  type="password"
+                  name="password"
+                  data-testid="school-password-input"
+                  value={formData.password}
+                  onChange={handleInputChange}
+                  required={!editingSchool}
+                  placeholder="Enter password"
+                />
+              </div>
+
+              <div className="form-group">
+                <label data-testid="school-logo-label">School Logo {editingSchool && '(optional)'}</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  data-testid="school-logo-input"
+                  onChange={handleFileChange}
+                />
+              </div>
+
+              <div className="modal-actions">
+                <button type="submit" className="submit-btn" data-testid="submit-school-btn" disabled={loading}>
+                  {loading ? 'Saving...' : (editingSchool ? 'Update School' : 'Add School')}
+                </button>
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  data-testid="cancel-school-btn"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setEditingSchool(null);
+                    setFormData({
+                      school_id: '',
+                      school_name: '',
+                      email: '',
+                      password: '',
+                      logo: null
+                    });
+                    setError('');
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <Layout style={{ minHeight: '100vh' }}>
+      <Sidebar collapsed={collapsed} onCollapse={setCollapsed} />
+      <Layout style={{ marginLeft: collapsed ? 80 : 250, transition: 'all 0.2s' }}>
+        <Header style={{
+          padding: 0,
+          background: '#fff',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 24px',
+          boxShadow: '0 1px 4px rgba(0,21,41,.08)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <Button
+              type="text"
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setCollapsed(!collapsed)}
+              style={{
+                fontSize: '16px',
+                width: 64,
+                height: 64,
+              }}
+            />
+            <div className="brand-section" style={{ display: 'flex', alignItems: 'center' }}>
+              <img 
+                src="/wonder-learning-logo.png" 
+                alt="Wonder Learning India Digital Library" 
+                style={{ height: '40px', marginRight: '16px' }} 
+              />
+              <span style={{ fontSize: '18px', fontWeight: 'bold' }}>Wonder Learning India Digital Library</span>
+            </div>
+          </div>
+          <div>
+            <span style={{ marginRight: '16px' }}>{user?.name || user?.email}</span>
+            <Button 
+              type="primary" 
+              onClick={handleLogout} 
+              icon={<LogoutOutlined />}
+              style={{ backgroundColor: '#001529', borderColor: '#001529' }}
+            >
+              Logout
+            </Button>
+          </div>
+        </Header>
+        <Content
+          style={{
+            margin: '24px 16px',
+            padding: 24,
+            minHeight: 280,
+            background: colorBgContainer,
+            borderRadius: borderRadiusLG,
+          }}
+        >
+          <Routes>
+            <Route path="/" element={<DashboardHome />} />
+            <Route path="/schools" element={renderSchoolManagement()} />
+            
+            {/* Resource Management */}
+            <Route path="/resources" element={<ResourceManagement />}>
+              <Route index element={<ResourcesHome />} />
+              <Route path="academic" element={<AcademicResources />} />
+              <Route path="marketing" element={<MarketingResources />} />
+              <Route path="administrative" element={<AdministrativeResources />} />
+              <Route path="training" element={<TrainingResources />} />
+              <Route path="event" element={<EventResources />} />
+              <Route path="multimedia" element={<MultimediaCollection />} />
+              <Route path="*" element={<Navigate to="/admin/resources" replace />} />
+            </Route>
+            
+            {/* Analytics & Tracking */}
+            <Route path="/analytics" element={<div style={{ padding: '24px' }}><Outlet /></div>}>
+              <Route path="school-activity" element={<SchoolActivity />} />
+              <Route path="resource-analytics" element={<ResourceAnalytics />} />
+              <Route path="search-analytics" element={<div>Search Analytics - Coming Soon</div>} />
+              <Route path="download-tracking" element={<div>Download Tracking - Coming Soon</div>} />
+              <Route index element={<Navigate to="school-activity" replace />} />
+            </Route>
+            
+            {/* Communication Center */}
+            <Route path="/communication" element={<div style={{ padding: '24px' }}><Outlet /></div>}>
+              <Route path="announcements" element={<Announcements />} />
+              <Route path="chat" element={<AdminChat />} />
+              <Route index element={<Navigate to="announcements" replace />} />
+            </Route>
+            
+            {/* Support & Feedback */}
+            <Route path="/support" element={<div style={{ padding: '24px' }}><Outlet /></div>}>
+              <Route path="tickets" element={<SupportTickets />} />
+              <Route path="knowledge-base" element={<KnowledgeBase />} />
+              <Route index element={<Navigate to="tickets" replace />} />
+            </Route>
+            
+            {/* Settings */}
+            <Route path="/settings" element={<div style={{ padding: '24px' }}><Outlet /></div>}>
+              <Route path="profile" element={<AdminProfile />} />
+              <Route path="branding" element={<Branding />} />
+              <Route path="cms" element={<ContentManagement />} />
+              <Route path="admins" element={<AdminUsers />} />
+              <Route path="security" element={<Security />} />
+              <Route path="backup" element={<DataBackup />} />
+              <Route index element={<Navigate to="profile" replace />} />
+            </Route>
+            
+            {/* Catch-all route */}
+            <Route path="*" element={<Navigate to="/admin" replace />} />
+          </Routes>
+        </Content>
+      </Layout>
+    </Layout>
+  );
+};
+
+export default AdminDashboard;
