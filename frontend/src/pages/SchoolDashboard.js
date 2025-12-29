@@ -109,12 +109,7 @@ const SchoolDashboard = ({ user, setUser }) => {
             {/* Resource Management */}
             <Route path="/resources" element={<SchoolResourceManagement />}>
               <Route index element={<SchoolResourcesHome />} />
-              <Route path="academic" element={<SchoolResourceCategory user={user} />} />
-              <Route path="marketing" element={<SchoolResourceCategory user={user} />} />
-              <Route path="administrative" element={<SchoolResourceCategory user={user} />} />
-              <Route path="training" element={<SchoolResourceCategory user={user} />} />
-              <Route path="event" element={<SchoolResourceCategory user={user} />} />
-              <Route path="multimedia" element={<SchoolResourceCategory user={user} />} />
+              <Route path=":category" element={<SchoolResourceCategory user={user} />} />
               <Route path="my-uploads" element={<SchoolMyUploads user={user} />} />
             </Route>
             

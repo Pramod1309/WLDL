@@ -295,10 +295,11 @@ const SchoolResourceCategory = ({ user }) => {
       videoRefs.current[record.resource_id].currentTime = 0;
     }
 
-    // Safety timeout: Stop loading after 10 seconds if content doesn't load
+    // Reduced timeout: Stop loading after 3 seconds if content doesn't load
+    // Most files should load within this timeframe with proper streaming
     setTimeout(() => {
       setPreviewLoading(false);
-    }, 10000);
+    }, 3000);
   };
 
   const renderPreview = () => {
@@ -329,6 +330,11 @@ const SchoolResourceCategory = ({ user }) => {
 
     // Check for PDF
     if (fileType.includes('pdf') || fileExtension === 'pdf') {
+      // Stop loading immediately for PDFs as they stream progressively
+      if (previewLoading) {
+        setTimeout(() => setPreviewLoading(false), 500);
+      }
+      
       return (
         <div style={{ width: '100%', height: '600px', overflow: 'hidden' }}>
           <iframe
@@ -358,6 +364,11 @@ const SchoolResourceCategory = ({ user }) => {
     // Check for images
     const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
     if (imageExtensions.includes(fileExtension) || fileType.includes('image')) {
+      // Images typically load fast, stop loading spinner immediately
+      if (previewLoading) {
+        setTimeout(() => setPreviewLoading(false), 300);
+      }
+      
       return (
         <div style={{ textAlign: 'center', maxHeight: '600px', overflow: 'auto' }}>
           <img
@@ -391,6 +402,11 @@ const SchoolResourceCategory = ({ user }) => {
 
     // Check for videos
     if (fileType.includes('video') || ['mp4', 'webm', 'ogg', 'mov', 'avi', 'mkv'].includes(fileExtension)) {
+      // Stop loading as soon as video metadata is loaded
+      if (previewLoading) {
+        setTimeout(() => setPreviewLoading(false), 500);
+      }
+      
       return (
         <div style={{ textAlign: 'center', maxHeight: '600px', overflow: 'auto' }}>
           <video
@@ -401,10 +417,15 @@ const SchoolResourceCategory = ({ user }) => {
             }}
             controls
             autoPlay
+            preload="metadata"
             style={{
               width: '100%',
               maxHeight: '600px',
               borderRadius: '8px'
+            }}
+            onLoadedMetadata={() => {
+              console.log('Video metadata loaded');
+              setPreviewLoading(false);
             }}
             onLoadedData={() => {
               console.log('Video loaded successfully');
