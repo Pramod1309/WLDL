@@ -269,6 +269,11 @@ const AdminResourceCategory = ({ category, title, description }) => {
       videoRefs.current[record.resource_id].pause();
       videoRefs.current[record.resource_id].currentTime = 0;
     }
+
+    // Safety timeout: Stop loading after 10 seconds if content doesn't load
+    setTimeout(() => {
+      setPreviewLoading(false);
+    }, 10000);
   };
 
   const renderPreview = () => {

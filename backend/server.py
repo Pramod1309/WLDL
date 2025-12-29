@@ -821,7 +821,7 @@ async def preview_resource(
     resource_id: str,
     db: Session = Depends(get_db)
 ):
-    """Preview a resource file (for images and PDFs)"""
+    """Preview a resource file (supports all file types)"""
     try:
         print(f"Preview requested for resource_id: {resource_id}")
         
@@ -830,7 +830,7 @@ async def preview_resource(
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         
-        print(f"Resource found: {resource.name}, file_path: {resource.file_path}")
+        print(f"Resource found: {resource.name}, file_path: {resource.file_path}, file_type: {resource.file_type}")
         
         # Get the file path - FIXED: Handle different path formats
         file_path = resource.file_path
@@ -864,25 +864,25 @@ async def preview_resource(
         
         print(f"File found for preview: {full_file_path}")
         
-        # Check file type for preview
-        file_type = resource.file_type or ''
-        supported_previews = ['image/', 'application/pdf', 'text/']
+        # Determine the correct media type
+        file_type = resource.file_type
+        if not file_type or file_type == 'application/octet-stream':
+            # Try to infer from file extension
+            import mimetypes
+            file_type = mimetypes.guess_type(full_file_path)[0] or 'application/octet-stream'
+            print(f"Inferred file type: {file_type}")
         
-        if not any(file_type.startswith(pt) for pt in supported_previews):
-            # For unsupported types, return a download response
-            return FileResponse(
-                path=full_file_path,
-                filename=resource.name,
-                media_type=file_type or 'application/octet-stream',
-                headers={"Content-Disposition": f"inline; filename=\"{resource.name}\""}
-            )
-        
-        # Return the file for preview
+        # Return the file for inline preview with proper headers
+        # Using "inline" disposition allows browser to display the file
         return FileResponse(
             path=full_file_path,
             filename=resource.name,
-            media_type=file_type or 'application/octet-stream',
-            headers={"Content-Disposition": f"inline; filename=\"{resource.name}\""}
+            media_type=file_type,
+            headers={
+                "Content-Disposition": f"inline; filename=\"{resource.name}\"",
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=3600"
+            }
         )
         
     except HTTPException:
