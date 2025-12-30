@@ -253,8 +253,8 @@ const Sidebar = ({ collapsed, onCollapse }) => {
             key="logout" 
             icon={<LogoutOutlined />}
             onClick={() => {
-              localStorage.removeItem('token');
-              localStorage.removeItem('user');
+              sessionStorage.removeItem('token');
+              sessionStorage.removeItem('user');
               window.location.href = '/';
             }}
           >

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Layout, Button, theme } from 'antd';
 import { MenuUnfoldOutlined, MenuFoldOutlined, LogoutOutlined } from '@ant-design/icons';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import SchoolSidebar from '../components/SchoolSidebar';
 import SchoolHome from './school/SchoolHome';
@@ -24,6 +24,15 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const SchoolDashboard = ({ user, setUser }) => {
+  const navigate = useNavigate();
+  
+  // Check for active session on mount
+  React.useEffect(() => {
+    const savedUser = sessionStorage.getItem('user');
+    if (!savedUser) {
+      navigate('/');
+    }
+  }, [navigate]);
   const [collapsed, setCollapsed] = useState(false);
 
   const {
@@ -40,8 +49,8 @@ const SchoolDashboard = ({ user, setUser }) => {
       console.error('Error logging logout:', err);
     }
     
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('user');
     setUser(null);
     window.location.href = '/';
   };

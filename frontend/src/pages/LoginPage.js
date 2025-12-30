@@ -28,15 +28,16 @@ const LoginPage = ({ setUser }) => {
       });
 
       const userData = response.data;
+      // Store user data in sessionStorage and update state
+      sessionStorage.setItem('token', userData.access_token);
+      sessionStorage.setItem('user', JSON.stringify(userData));
       setUser(userData);
-      localStorage.setItem('token', userData.access_token);
-      localStorage.setItem('user', JSON.stringify(userData));
 
       // Navigate to appropriate dashboard
       if (userData.user_type === 'admin') {
-        navigate('/admin');
+        navigate('/admin', { replace: true });
       } else {
-        navigate('/school');
+        navigate('/school', { replace: true });
       }
     } catch (err) {
       setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');

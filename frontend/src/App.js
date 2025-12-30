@@ -7,7 +7,11 @@ import SchoolDashboard from './pages/SchoolDashboard';
 import './App.css';
 
 function App() {
-  const [user, setUser] = React.useState(JSON.parse(localStorage.getItem('user')));
+  // Initialize user state from sessionStorage if it exists
+  const [user, setUser] = React.useState(() => {
+    const savedUser = sessionStorage.getItem('user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
 
   return (
     <Router>
