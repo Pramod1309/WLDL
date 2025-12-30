@@ -1,6 +1,6 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Request
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Request, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from dotenv import load_dotenv
 import os
 from starlette.middleware.cors import CORSMiddleware
@@ -17,7 +17,9 @@ import shutil
 from jose import JWTError, jwt
 from PIL import Image, ImageDraw, ImageFont
 import fitz  # PyMuPDF for PDF processing
-from io import BytesIO
+from io import BytesIO, StringIO
+import tempfile
+import io
 
 # Import database
 from database import (
@@ -1291,192 +1293,39 @@ async def reset_logo_position(
 
 # ==================== LOGO WATERMARK ROUTES ====================
 
-@api_router.get("/resources/{resource_id}/download-with-logo")
-async def download_resource_with_logo(
-    resource_id: str,
-    school_id: str = None,
-    school_name: str = None,
-    db: Session = Depends(get_db)
-):
-    """Download a resource file with school logo watermark"""
-    try:
-        print(f"Download with logo requested for resource_id: {resource_id}, school_id: {school_id}")
-        
-        # Get the resource from the database
-        resource = db.query(Resource).filter(Resource.resource_id == resource_id).first()
-        if not resource:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        
-        print(f"Resource found: {resource.name}, category: {resource.category}")
-        
-        # Get logo position for this school and resource
-        logo_position = db.query(SchoolLogoPosition).filter(
-            SchoolLogoPosition.school_id == school_id,
-            SchoolLogoPosition.resource_id == resource_id
-        ).first()
-        
-        # Get school info for logo
-        school = db.query(School).filter(School.school_id == school_id).first()
-        
-        print(f"School found: {school is not None}")
-        print(f"Logo position found: {logo_position is not None}")
-        
-        # Get file path
-        file_path = resource.file_path
-        if file_path.startswith('/'):
-            file_path = file_path[1:]
-        
-        full_file_path = os.path.join(ROOT_DIR, file_path)
-        
-        if not os.path.exists(full_file_path):
-            # Try alternative paths
-            if file_path.startswith('uploads/'):
-                alt_path = file_path
-            else:
-                alt_path = os.path.join("uploads", file_path)
-            
-            full_file_path = os.path.join(ROOT_DIR, alt_path)
-            
-            if not os.path.exists(full_file_path):
-                filename = os.path.basename(file_path)
-                resource_dir = os.path.join(ROOT_DIR, "uploads", "resources", resource.category)
-                full_file_path = os.path.join(resource_dir, filename)
-                
-                if not os.path.exists(full_file_path):
-                    raise HTTPException(status_code=404, detail="File not found on server")
-        
-        print(f"File found: {full_file_path}")
-        
-        # Determine if we should add logo (not for multimedia)
-        add_logo = (resource.category != 'multimedia' and 
-                   school and school.logo_path and 
-                   logo_position)
-        
-        if add_logo:
-            # Get school logo path
-            logo_path = school.logo_path
-            if logo_path.startswith('/'):
-                logo_path = logo_path[1:]
-            
-            logo_full_path = os.path.join(ROOT_DIR, logo_path)
-            
-            if not os.path.exists(logo_full_path):
-                print(f"Logo not found: {logo_full_path}")
-                add_logo = False
-            else:
-                print(f"Logo found: {logo_full_path}")
-                print(f"Logo position: x={logo_position.x_position}, y={logo_position.y_position}, width={logo_position.width}, opacity={logo_position.opacity}")
-        
-        # Process file based on type
-        file_type = resource.file_type.lower()
-        
-        if add_logo:
-            print(f"Adding logo watermark to file: {resource.name}")
-            # Create watermarked version
-            watermarked_file = add_logo_watermark(
-                full_file_path, 
-                logo_full_path, 
-                logo_position,
-                resource.file_type
-            )
-            
-            if watermarked_file:
-                # Log download
-                if school_id and school_name:
-                    download_log = ResourceDownload(
-                        resource_id=resource_id,
-                        school_id=school_id,
-                        school_name=school_name
-                    )
-                    db.add(download_log)
-                    resource.download_count += 1
-                    db.commit()
-                
-                # Return watermarked file
-                file_extension = resource.file_type.split('/')[-1] if resource.file_type else ''
-                download_filename = f"{resource.name}_branded.{file_extension}" if file_extension else f"{resource.name}_branded"
-                
-                print(f"Returning watermarked file: {watermarked_file}")
-                return FileResponse(
-                    path=watermarked_file,
-                    filename=download_filename,
-                    media_type=resource.file_type or 'application/octet-stream',
-                    headers={
-                        "Content-Disposition": f"attachment; filename=\"{download_filename}\"",
-                        "Access-Control-Expose-Headers": "Content-Disposition"
-                    }
-                )
-            else:
-                print(f"Failed to create watermarked file, returning original")
-        
-        # If no logo or watermarking failed, return original file
-        # Log download if school info is provided
-        if school_id and school_name:
-            download_log = ResourceDownload(
-                resource_id=resource_id,
-                school_id=school_id,
-                school_name=school_name
-            )
-            db.add(download_log)
-            resource.download_count += 1
-            db.commit()
-        
-        # Determine file extension for download
-        file_extension = resource.file_type.split('/')[-1] if resource.file_type else ''
-        download_filename = f"{resource.name}"
-        if file_extension and not download_filename.endswith(f".{file_extension}"):
-            download_filename = f"{download_filename}.{file_extension}"
-        
-        print(f"Returning original file (no watermark)")
-        # Return the original file
-        return FileResponse(
-            path=full_file_path,
-            filename=download_filename,
-            media_type=resource.file_type or 'application/octet-stream',
-            headers={
-                "Content-Disposition": f"attachment; filename=\"{download_filename}\"",
-                "Access-Control-Expose-Headers": "Content-Disposition"
-            }
-        )
-        
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        db.rollback()
-        print(f"Download with logo error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
 def add_logo_watermark(file_path, logo_path, logo_position, file_type):
     """Add logo watermark to a file and return the watermarked file path"""
     try:
-        # Create temp file path
+        print(f"=== WATERMARKING FUNCTION ===")
+        print(f"File: {file_path}")
+        print(f"Logo: {logo_path}")
+        print(f"File type: {file_type}")
+        
+        # Create unique temp file path
         import tempfile
         temp_dir = tempfile.gettempdir()
-        temp_filename = f"watermarked_{os.path.basename(file_path)}"
+        file_name = os.path.basename(file_path)
+        name, ext = os.path.splitext(file_name)
+        temp_filename = f"{name}_branded{ext}"
         temp_file_path = os.path.join(temp_dir, temp_filename)
         
-        file_type_lower = file_type.lower()
+        print(f"Temp output: {temp_file_path}")
         
-        print(f"Watermarking file type: {file_type}")
+        file_type_lower = file_type.lower() if file_type else ''
         
         # Handle different file types
-        if 'pdf' in file_type_lower:
+        if 'pdf' in file_type_lower or file_path.lower().endswith('.pdf'):
+            print(f"Processing as PDF")
             return add_logo_to_pdf(file_path, logo_path, logo_position, temp_file_path)
-        elif any(img_type in file_type_lower for img_type in ['jpeg', 'jpg', 'png', 'gif', 'bmp', 'tiff']):
+        elif any(img_type in file_type_lower for img_type in ['jpeg', 'jpg', 'png', 'gif', 'bmp', 'tiff', 'webp']):
+            print(f"Processing as image")
             return add_logo_to_image(file_path, logo_path, logo_position, temp_file_path)
-        elif any(doc_type in file_type_lower for doc_type in ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx']):
-            # For office documents, we'll return original for now
-            # In production, you might want to use python-pptx, python-docx libraries
-            print(f"Logo watermarking not supported for office documents yet: {file_type}")
-            return None
         else:
             print(f"Unsupported file type for watermarking: {file_type}")
             return None
             
     except Exception as e:
-        print(f"Error adding logo watermark: {e}")
+        print(f"Error in add_logo_watermark: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
@@ -1484,13 +1333,18 @@ def add_logo_watermark(file_path, logo_path, logo_position, file_type):
 def add_logo_to_pdf(pdf_path, logo_path, logo_position, output_path):
     """Add logo to PDF"""
     try:
-        print(f"Adding logo to PDF: {pdf_path}")
+        print(f"=== ADDING LOGO TO PDF ===")
+        print(f"PDF: {pdf_path}")
+        print(f"Logo: {logo_path}")
+        print(f"Position: x={logo_position.x_position}%, y={logo_position.y_position}%")
+        print(f"Size: width={logo_position.width}%, opacity={logo_position.opacity}")
         
         # Open PDF
         pdf_document = fitz.open(pdf_path)
         
         # Open logo image
         logo_img = Image.open(logo_path)
+        print(f"Original logo size: {logo_img.size}")
         
         # Convert logo to RGBA if needed
         if logo_img.mode != 'RGBA':
@@ -1501,12 +1355,12 @@ def add_logo_to_pdf(pdf_path, logo_path, logo_position, output_path):
             alpha = logo_img.split()[3]
             alpha = alpha.point(lambda p: p * logo_position.opacity)
             logo_img.putalpha(alpha)
+            print(f"Applied opacity: {logo_position.opacity}")
         
-        # Resize logo based on width percentage
+        # Get first page for dimensions
         first_page = pdf_document[0]
         page_width = first_page.rect.width
         page_height = first_page.rect.height
-        
         print(f"Page dimensions: {page_width}x{page_height}")
         
         # Calculate logo size (width as percentage of page width)
@@ -1516,13 +1370,13 @@ def add_logo_to_pdf(pdf_path, logo_path, logo_position, output_path):
         aspect_ratio = logo_img.width / logo_img.height
         logo_height_pixels = int(logo_width_pixels / aspect_ratio)
         
-        print(f"Logo size: {logo_width_pixels}x{logo_height_pixels}")
+        print(f"Resized logo: {logo_width_pixels}x{logo_height_pixels}")
         
         # Resize logo
         logo_img = logo_img.resize((logo_width_pixels, logo_height_pixels), Image.Resampling.LANCZOS)
         
-        # Convert PIL image to bytes
-        logo_bytes = BytesIO()
+        # Convert PIL image to bytes (PNG format)
+        logo_bytes = io.BytesIO()
         logo_img.save(logo_bytes, format='PNG')
         logo_bytes.seek(0)
         
@@ -1530,20 +1384,23 @@ def add_logo_to_pdf(pdf_path, logo_path, logo_position, output_path):
         for page_num in range(len(pdf_document)):
             page = pdf_document[page_num]
             
-            # Calculate position
+            # Calculate position in points
             x_position = page.rect.width * (logo_position.x_position / 100)
             y_position = page.rect.height * (logo_position.y_position / 100)
             
-            print(f"Adding logo to page {page_num+1} at position: {x_position}, {y_position}")
+            print(f"Page {page_num+1}: Logo at ({x_position}, {y_position})")
+            
+            # Create rectangle for logo placement
+            rect = fitz.Rect(
+                x_position - (logo_width_pixels / 2),
+                y_position - (logo_height_pixels / 2),
+                x_position + (logo_width_pixels / 2),
+                y_position + (logo_height_pixels / 2)
+            )
             
             # Insert logo image
             page.insert_image(
-                fitz.Rect(
-                    x_position - (logo_width_pixels / 2),
-                    y_position - (logo_height_pixels / 2),
-                    x_position + (logo_width_pixels / 2),
-                    y_position + (logo_height_pixels / 2)
-                ),
+                rect,
                 stream=logo_bytes.getvalue()
             )
         
@@ -1552,28 +1409,38 @@ def add_logo_to_pdf(pdf_path, logo_path, logo_position, output_path):
         pdf_document.close()
         
         print(f"Saved watermarked PDF to: {output_path}")
+        print(f"File exists: {os.path.exists(output_path)}")
+        print(f"File size: {os.path.getsize(output_path)} bytes")
+        
         return output_path
         
     except Exception as e:
-        print(f"Error adding logo to PDF: {e}")
+        print(f"Error adding logo to PDF: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def add_logo_to_image(image_path, logo_path, logo_position, output_path):
     """Add logo to image"""
     try:
-        print(f"Adding logo to image: {image_path}")
+        print(f"=== ADDING LOGO TO IMAGE ===")
+        print(f"Image: {image_path}")
+        print(f"Logo: {logo_path}")
         
         # Open base image
         base_img = Image.open(image_path).convert('RGBA')
+        print(f"Base image size: {base_img.size}, mode: {base_img.mode}")
         
         # Open logo image
         logo_img = Image.open(logo_path).convert('RGBA')
+        print(f"Original logo size: {logo_img.size}, mode: {logo_img.mode}")
         
         # Apply opacity
         if logo_position.opacity < 1.0:
             alpha = logo_img.split()[3]
             alpha = alpha.point(lambda p: p * logo_position.opacity)
             logo_img.putalpha(alpha)
+            print(f"Applied opacity: {logo_position.opacity}")
         
         # Calculate logo size
         base_width, base_height = base_img.size
@@ -1614,11 +1481,193 @@ def add_logo_to_image(image_path, logo_path, logo_position, output_path):
         watermarked.save(output_path, quality=95)
         
         print(f"Saved watermarked image to: {output_path}")
+        print(f"File size: {os.path.getsize(output_path)} bytes")
         return output_path
         
     except Exception as e:
-        print(f"Error adding logo to image: {e}")
+        print(f"Error adding logo to image: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return None
+
+@api_router.get("/resources/{resource_id}/download-with-logo")
+async def download_resource_with_logo(
+    resource_id: str,
+    school_id: str = None,
+    school_name: str = None,
+    db: Session = Depends(get_db)
+):
+    """Download a resource file with school logo watermark"""
+    try:
+        print(f"=== DOWNLOAD WITH LOGO REQUEST ===")
+        print(f"Resource ID: {resource_id}")
+        print(f"School ID: {school_id}")
+        
+        # Get the resource from the database
+        resource = db.query(Resource).filter(Resource.resource_id == resource_id).first()
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        
+        print(f"Resource: {resource.name}")
+        print(f"Category: {resource.category}")
+        print(f"File type: {resource.file_type}")
+        
+        # Get school info
+        school = None
+        if school_id:
+            school = db.query(School).filter(School.school_id == school_id).first()
+            print(f"School found: {school is not None}")
+        
+        # Get logo position for this school and resource
+        logo_position = None
+        if school_id and resource_id:
+            logo_position = db.query(SchoolLogoPosition).filter(
+                SchoolLogoPosition.school_id == school_id,
+                SchoolLogoPosition.resource_id == resource_id
+            ).first()
+            print(f"Logo position found: {logo_position is not None}")
+        
+        # Get file path
+        file_path = resource.file_path
+        if file_path.startswith('/'):
+            file_path = file_path[1:]
+        
+        full_file_path = os.path.join(ROOT_DIR, file_path)
+        
+        # Try to find the file
+        if not os.path.exists(full_file_path):
+            # Try alternative paths
+            alternative_paths = [
+                file_path,
+                os.path.join("uploads", file_path),
+                os.path.join("uploads", file_path.lstrip('/')),
+                os.path.join(ROOT_DIR, "uploads", "resources", resource.category, os.path.basename(file_path))
+            ]
+            
+            for alt_path in alternative_paths:
+                test_path = os.path.join(ROOT_DIR, alt_path) if not os.path.isabs(alt_path) else alt_path
+                if os.path.exists(test_path):
+                    full_file_path = test_path
+                    print(f"Found file at: {full_file_path}")
+                    break
+            else:
+                raise HTTPException(status_code=404, detail="File not found on server")
+        
+        print(f"Final file path: {full_file_path}")
+        
+        # Check if we should add logo
+        add_logo = False
+        logo_full_path = None
+        
+        if (school and school.logo_path and 
+            logo_position and 
+            resource.category != 'multimedia'):
+            
+            logo_path = school.logo_path
+            if logo_path.startswith('/'):
+                logo_path = logo_path[1:]
+            
+            logo_full_path = os.path.join(ROOT_DIR, logo_path)
+            
+            if os.path.exists(logo_full_path):
+                add_logo = True
+                print(f"Will add logo from: {logo_full_path}")
+                print(f"Logo position: x={logo_position.x_position}, y={logo_position.y_position}, "
+                      f"width={logo_position.width}, opacity={logo_position.opacity}")
+            else:
+                print(f"Logo not found at: {logo_full_path}")
+                add_logo = False
+        
+        # Create watermarked file if needed
+        if add_logo:
+            print(f"Creating watermarked version...")
+            watermarked_file = add_logo_watermark(
+                full_file_path, 
+                logo_full_path, 
+                logo_position,
+                resource.file_type
+            )
+            
+            if watermarked_file and os.path.exists(watermarked_file):
+                print(f"Watermarked file created: {watermarked_file}")
+                
+                # Log download
+                if school_id and school_name:
+                    download_log = ResourceDownload(
+                        resource_id=resource_id,
+                        school_id=school_id,
+                        school_name=school_name
+                    )
+                    db.add(download_log)
+                    resource.download_count += 1
+                    db.commit()
+                
+                # Read watermarked file
+                with open(watermarked_file, 'rb') as f:
+                    file_content = f.read()
+                
+                # Clean up temp file
+                try:
+                    os.remove(watermarked_file)
+                except:
+                    pass
+                
+                # Return watermarked file
+                file_extension = resource.file_type.split('/')[-1] if resource.file_type else ''
+                download_filename = f"{resource.name.replace(' ', '_')}_branded"
+                if file_extension:
+                    download_filename += f".{file_extension}"
+                
+                print(f"Returning watermarked file: {download_filename}")
+                return Response(
+                    content=file_content,
+                    media_type=resource.file_type or 'application/octet-stream',
+                    headers={
+                        "Content-Disposition": f"attachment; filename=\"{download_filename}\"",
+                        "Content-Length": str(len(file_content))
+                    }
+                )
+            else:
+                print(f"Watermarking failed, falling back to original")
+        
+        # Fallback to original file (no watermark)
+        print(f"Using original file (no watermark)")
+        
+        # Log download if school info is provided
+        if school_id and school_name:
+            download_log = ResourceDownload(
+                resource_id=resource_id,
+                school_id=school_id,
+                school_name=school_name
+            )
+            db.add(download_log)
+            resource.download_count += 1
+            db.commit()
+        
+        # Determine download filename
+        file_extension = resource.file_type.split('/')[-1] if resource.file_type else ''
+        download_filename = f"{resource.name.replace(' ', '_')}"
+        if file_extension and not download_filename.endswith(f".{file_extension}"):
+            download_filename = f"{download_filename}.{file_extension}"
+        
+        # Return original file
+        return FileResponse(
+            path=full_file_path,
+            filename=download_filename,
+            media_type=resource.file_type or 'application/octet-stream',
+            headers={
+                "Content-Disposition": f"attachment; filename=\"{download_filename}\""
+            }
+        )
+        
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        db.rollback()
+        print(f"Download with logo error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ==================== ANALYTICS ROUTES ====================
 
@@ -1675,6 +1724,33 @@ async def get_school_usage(school_id: str, db: Session = Depends(get_db)):
         "resources_uploaded": uploads_by_school,
         "storage_used_bytes": storage_used,
         "storage_used_mb": round(storage_used / (1024 * 1024), 2)
+    }
+
+# Debug endpoint for logo positions
+@api_router.get("/debug/logo-position/{resource_id}")
+async def debug_logo_position(
+    resource_id: str,
+    school_id: str,
+    db: Session = Depends(get_db)
+):
+    """Debug endpoint to check logo position"""
+    position = db.query(SchoolLogoPosition).filter(
+        SchoolLogoPosition.school_id == school_id,
+        SchoolLogoPosition.resource_id == resource_id
+    ).first()
+    
+    if not position:
+        return {"message": "No logo position found", "exists": False}
+    
+    return {
+        "exists": True,
+        "school_id": position.school_id,
+        "resource_id": position.resource_id,
+        "x_position": position.x_position,
+        "y_position": position.y_position,
+        "width": position.width,
+        "opacity": position.opacity,
+        "updated_at": position.updated_at.isoformat() if position.updated_at else None
     }
 
 @api_router.get("/")
