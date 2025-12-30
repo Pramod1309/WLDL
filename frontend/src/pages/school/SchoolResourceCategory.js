@@ -312,20 +312,28 @@ const SchoolResourceCategory = ({ user }) => {
     if (!previewResource || category === 'multimedia') return;
     
     try {
+      // Round float values to integers as backend expects integers
+      const roundedPosition = {
+        x: Math.round(logoPosition.x),
+        y: Math.round(logoPosition.y),
+        width: Math.round(logoPosition.width),
+        opacity: Number(logoPosition.opacity.toFixed(2)) // Keep opacity as float with 2 decimals
+      };
+      
       console.log('Saving logo position with data:', {
         school_id: user.school_id,
         resource_id: previewResource.resource_id,
-        logoPosition: logoPosition
+        logoPosition: roundedPosition
       });
       
       // Create FormData object
       const formData = new FormData();
       formData.append('school_id', user.school_id);
       formData.append('resource_id', previewResource.resource_id);
-      formData.append('x_position', logoPosition.x.toString());
-      formData.append('y_position', logoPosition.y.toString());
-      formData.append('width', logoPosition.width.toString());
-      formData.append('opacity', logoPosition.opacity.toString());
+      formData.append('x_position', roundedPosition.x.toString());
+      formData.append('y_position', roundedPosition.y.toString());
+      formData.append('width', roundedPosition.width.toString());
+      formData.append('opacity', roundedPosition.opacity.toString());
       
       const response = await axios.post(`${API}/school/logo-position`, formData, {
         headers: {
