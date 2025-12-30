@@ -20,7 +20,7 @@ const API = `${BACKEND_URL}/api`;
 const { Option } = Select;
 const { TextArea } = Input;
 
-// LogoOverlay Component
+// LogoOverlay Component - UPDATED with containerRef prop
 const LogoOverlay = ({ 
   logoUrl, 
   logoPosition, 
@@ -30,7 +30,8 @@ const LogoOverlay = ({
   handleLogoDrag,
   showControls,
   handleLogoResize,
-  handleLogoOpacityChange
+  handleLogoOpacityChange,
+  containerRef // NEW: Container ref for positioning
 }) => {
   const logoStyle = {
     position: 'absolute',
@@ -59,7 +60,7 @@ const LogoOverlay = ({
         onMouseDown={() => isEditingLogo && setIsDraggingLogo(true)}
         onMouseUp={() => setIsDraggingLogo(false)}
         onMouseLeave={() => setIsDraggingLogo(false)}
-        onMouseMove={handleLogoDrag}
+        onMouseMove={(e) => containerRef?.current && handleLogoDrag(e, containerRef.current)}
       />
       
       {isEditingLogo && showControls && (
@@ -157,6 +158,9 @@ const SchoolResourceCategory = ({ user }) => {
   
   const iframeRef = useRef(null);
   const videoRefs = useRef({});
+  const pdfContainerRef = useRef(null); // NEW: Container ref for PDF
+  const imageContainerRef = useRef(null); // NEW: Container ref for images
+  const docContainerRef = useRef(null); // NEW: Container ref for documents
   
   // Add mouse up event listener for dragging
   useEffect(() => {
@@ -374,11 +378,10 @@ const SchoolResourceCategory = ({ user }) => {
     }
   };
 
-  // Logo drag handler
-  const handleLogoDrag = (e) => {
-    if (!isDraggingLogo || !e.target.parentElement) return;
+  // Logo drag handler - UPDATED with container parameter
+  const handleLogoDrag = (e, container) => {
+    if (!isDraggingLogo || !container) return;
     
-    const container = e.target.parentElement;
     const rect = container.getBoundingClientRect();
     
     const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -611,7 +614,16 @@ const SchoolResourceCategory = ({ user }) => {
       }
       
       return (
-        <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+        <div 
+          ref={pdfContainerRef}
+          style={{ 
+            width: '100%', 
+            height: '100%', 
+            position: 'relative', 
+            overflow: 'hidden',
+            backgroundColor: '#f5f5f5'
+          }}
+        >
           <iframe
             ref={iframeRef}
             src={previewUrl}
@@ -647,6 +659,7 @@ const SchoolResourceCategory = ({ user }) => {
               showControls={showLogoControls}
               handleLogoResize={handleLogoResize}
               handleLogoOpacityChange={handleLogoOpacityChange}
+              containerRef={pdfContainerRef}
             />
           )}
         </div>
@@ -663,13 +676,18 @@ const SchoolResourceCategory = ({ user }) => {
       
       return (
         <div 
+          ref={imageContainerRef}
           style={{ 
             textAlign: 'center', 
             maxHeight: '100%', 
             overflow: 'auto',
             position: 'relative',
             height: '100%',
-            width: '100%'
+            width: '100%',
+            backgroundColor: '#f5f5f5',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}
         >
           <img
@@ -710,6 +728,7 @@ const SchoolResourceCategory = ({ user }) => {
               showControls={showLogoControls}
               handleLogoResize={handleLogoResize}
               handleLogoOpacityChange={handleLogoOpacityChange}
+              containerRef={imageContainerRef}
             />
           )}
         </div>
@@ -793,7 +812,10 @@ const SchoolResourceCategory = ({ user }) => {
     const docExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'];
     if (docExtensions.includes(fileExtension)) {
       return (
-        <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+        <div 
+          ref={docContainerRef}
+          style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
+        >
           <iframe
             src={previewUrl}
             style={{
@@ -828,6 +850,7 @@ const SchoolResourceCategory = ({ user }) => {
               showControls={showLogoControls}
               handleLogoResize={handleLogoResize}
               handleLogoOpacityChange={handleLogoOpacityChange}
+              containerRef={docContainerRef}
             />
           )}
         </div>
@@ -1544,7 +1567,7 @@ const SchoolResourceCategory = ({ user }) => {
         bodyStyle={{ 
           padding: 0, 
           height: '70vh', 
-          overflow: 'auto',
+          overflow: 'hidden', // UPDATED: Changed from 'auto' to 'hidden'
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center'
