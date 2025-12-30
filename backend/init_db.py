@@ -4,7 +4,7 @@ Initialize database and create tables
 import os
 from dotenv import load_dotenv
 from pathlib import Path
-from database import Base, engine, Admin, SessionLocal
+from database import Base, engine, Admin, SessionLocal, SchoolLogoPosition
 from passlib.context import CryptContext
 
 ROOT_DIR = Path(__file__).parent

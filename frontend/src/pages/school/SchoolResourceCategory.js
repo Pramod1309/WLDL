@@ -8,7 +8,9 @@ import {
   FilePdfOutlined, FileImageOutlined, FileWordOutlined, FilePptOutlined,
   FileZipOutlined, FileUnknownOutlined, FileExcelOutlined, VideoCameraOutlined,
   AudioOutlined, AppstoreOutlined, UnorderedListOutlined, FileTextOutlined,
-  LoadingOutlined, UploadOutlined, ClockCircleOutlined
+  LoadingOutlined, UploadOutlined, ClockCircleOutlined,
+  EditOutlined, SaveOutlined, UndoOutlined, ExpandOutlined,
+  MinusOutlined, PlusOutlined, EyeInvisibleOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -17,6 +19,116 @@ const API = `${BACKEND_URL}/api`;
 
 const { Option } = Select;
 const { TextArea } = Input;
+
+// LogoOverlay Component
+const LogoOverlay = ({ 
+  logoUrl, 
+  logoPosition, 
+  isEditingLogo, 
+  isDraggingLogo, 
+  setIsDraggingLogo,
+  handleLogoDrag,
+  showControls,
+  handleLogoResize,
+  handleLogoOpacityChange
+}) => {
+  const logoStyle = {
+    position: 'absolute',
+    left: `${logoPosition.x}%`,
+    top: `${logoPosition.y}%`,
+    width: `${logoPosition.width}%`,
+    opacity: logoPosition.opacity,
+    transform: 'translate(-50%, -50%)',
+    pointerEvents: isEditingLogo ? 'auto' : 'none',
+    zIndex: 2,
+    transition: isDraggingLogo ? 'none' : 'all 0.2s ease',
+    cursor: isEditingLogo ? (isDraggingLogo ? 'grabbing' : 'grab') : 'default',
+    filter: 'drop-shadow(2px 2px 4px rgba(0,0,0,0.3))',
+    maxWidth: '150px',
+    maxHeight: '80px',
+    objectFit: 'contain'
+  };
+
+  return (
+    <>
+      <img
+        src={logoUrl}
+        alt="School Logo"
+        style={logoStyle}
+        draggable={false}
+        onMouseDown={() => isEditingLogo && setIsDraggingLogo(true)}
+        onMouseUp={() => setIsDraggingLogo(false)}
+        onMouseLeave={() => setIsDraggingLogo(false)}
+        onMouseMove={handleLogoDrag}
+      />
+      
+      {isEditingLogo && showControls && (
+        <div style={{
+          position: 'absolute',
+          top: '10px',
+          right: '10px',
+          background: 'rgba(255,255,255,0.9)',
+          padding: '10px',
+          borderRadius: '6px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          zIndex: 3
+        }}>
+          <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>
+            Logo Controls
+          </div>
+          <div style={{ fontSize: '10px', color: '#666', marginBottom: '8px' }}>
+            Drag to reposition, use buttons to adjust
+          </div>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px',
+            marginBottom: '8px' 
+          }}>
+            <span style={{ fontSize: '11px' }}>Size:</span>
+            <Button 
+              size="small" 
+              icon={<MinusOutlined />} 
+              onClick={() => handleLogoResize(-5)}
+              disabled={logoPosition.width <= 5}
+            />
+            <span style={{ fontSize: '11px', minWidth: '30px', textAlign: 'center' }}>
+              {logoPosition.width}%
+            </span>
+            <Button 
+              size="small" 
+              icon={<PlusOutlined />} 
+              onClick={() => handleLogoResize(5)}
+              disabled={logoPosition.width >= 50}
+            />
+          </div>
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px' 
+          }}>
+            <span style={{ fontSize: '11px' }}>Opacity:</span>
+            <Button 
+              size="small" 
+              icon={<EyeInvisibleOutlined />} 
+              onClick={() => handleLogoOpacityChange(-0.1)}
+              disabled={logoPosition.opacity <= 0.1}
+            />
+            <span style={{ fontSize: '11px', minWidth: '30px', textAlign: 'center' }}>
+              {(logoPosition.opacity * 100).toFixed(0)}%
+            </span>
+            <Button 
+              size="small" 
+              icon={<EyeOutlined />} 
+              onClick={() => handleLogoOpacityChange(0.1)}
+              disabled={logoPosition.opacity >= 1.0}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
 
 const SchoolResourceCategory = ({ user }) => {
   const { category } = useParams();
@@ -34,8 +146,28 @@ const SchoolResourceCategory = ({ user }) => {
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [viewMode, setViewMode] = useState('list');
   
+  // Logo positioning states
+  const [logoPosition, setLogoPosition] = useState({ x: 50, y: 10, width: 20, opacity: 0.7 });
+  const [isEditingLogo, setIsEditingLogo] = useState(false);
+  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
+  const [logoUrl, setLogoUrl] = useState('');
+  const [showLogoControls, setShowLogoControls] = useState(true);
+  const [positionLoading, setPositionLoading] = useState(false);
+  const [isDefaultPosition, setIsDefaultPosition] = useState(true);
+  
   const iframeRef = useRef(null);
   const videoRefs = useRef({});
+  
+  // Add mouse up event listener for dragging
+  useEffect(() => {
+    const handleMouseUp = () => setIsDraggingLogo(false);
+    
+    window.addEventListener('mouseup', handleMouseUp);
+    
+    return () => {
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
   
   // Get category titles and descriptions
   const getCategoryInfo = () => {
@@ -133,6 +265,118 @@ const SchoolResourceCategory = ({ user }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Fetch logo position for a resource
+  const fetchLogoPosition = async (resourceId) => {
+    if (!resourceId || category === 'multimedia') return;
+    
+    try {
+      setPositionLoading(true);
+      const response = await axios.get(`${API}/school/logo-position/${resourceId}`, {
+        params: { school_id: user.school_id }
+      });
+      
+      setLogoPosition({
+        x: response.data.x_position,
+        y: response.data.y_position,
+        width: response.data.width,
+        opacity: response.data.opacity
+      });
+      setIsDefaultPosition(response.data.is_default);
+      
+      // Fetch school logo URL
+      if (user.logo_path) {
+        const fullLogoUrl = user.logo_path.startsWith('http') 
+          ? user.logo_path 
+          : `${BACKEND_URL}${user.logo_path}`;
+        setLogoUrl(fullLogoUrl);
+      }
+    } catch (error) {
+      console.error('Error fetching logo position:', error);
+      // Use defaults if error occurs
+      setLogoPosition({ x: 50, y: 10, width: 20, opacity: 0.7 });
+      setIsDefaultPosition(true);
+    } finally {
+      setPositionLoading(false);
+    }
+  };
+
+  // Save logo position
+  const saveLogoPosition = async () => {
+    if (!previewResource || category === 'multimedia') return;
+    
+    try {
+      await axios.post(`${API}/school/logo-position`, {
+        school_id: user.school_id,
+        resource_id: previewResource.resource_id,
+        x_position: logoPosition.x,
+        y_position: logoPosition.y,
+        width: logoPosition.width,
+        opacity: logoPosition.opacity
+      }, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      });
+      
+      setIsEditingLogo(false);
+      setIsDefaultPosition(false);
+      message.success('Logo position saved!');
+    } catch (error) {
+      console.error('Error saving logo position:', error);
+      message.error('Failed to save logo position');
+    }
+  };
+
+  // Reset logo position to default
+  const resetLogoPosition = async () => {
+    if (!previewResource || category === 'multimedia') return;
+    
+    try {
+      await axios.delete(`${API}/school/logo-position/${previewResource.resource_id}`, {
+        params: { school_id: user.school_id }
+      });
+      
+      setLogoPosition({ x: 50, y: 10, width: 20, opacity: 0.7 });
+      setIsDefaultPosition(true);
+      setIsEditingLogo(false);
+      message.success('Logo position reset to default');
+    } catch (error) {
+      console.error('Error resetting logo position:', error);
+      message.error('Failed to reset logo position');
+    }
+  };
+
+  // Logo drag handler
+  const handleLogoDrag = (e) => {
+    if (!isDraggingLogo || !e.target.parentElement) return;
+    
+    const container = e.target.parentElement;
+    const rect = container.getBoundingClientRect();
+    
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    
+    // Keep within bounds
+    const boundedX = Math.max(0, Math.min(100, x));
+    const boundedY = Math.max(0, Math.min(100, y));
+    
+    setLogoPosition(prev => ({ ...prev, x: boundedX, y: boundedY }));
+  };
+
+  // Logo resize handler
+  const handleLogoResize = (change) => {
+    setLogoPosition(prev => ({
+      ...prev,
+      width: Math.max(5, Math.min(50, prev.width + change))
+    }));
+  };
+
+  // Logo opacity handler
+  const handleLogoOpacityChange = (change) => {
+    setLogoPosition(prev => ({
+      ...prev,
+      opacity: Math.max(0.1, Math.min(1.0, prev.opacity + change))
+    }));
   };
 
   const handleUpload = async () => {
@@ -295,8 +539,12 @@ const SchoolResourceCategory = ({ user }) => {
       videoRefs.current[record.resource_id].currentTime = 0;
     }
 
+    // Fetch logo position for this resource (except multimedia category)
+    if (category !== 'multimedia') {
+      await fetchLogoPosition(record.resource_id);
+    }
+
     // Reduced timeout: Stop loading after 3 seconds if content doesn't load
-    // Most files should load within this timeframe with proper streaming
     setTimeout(() => {
       setPreviewLoading(false);
     }, 3000);
@@ -318,9 +566,8 @@ const SchoolResourceCategory = ({ user }) => {
     const fileName = previewResource.file_path ? previewResource.file_path.split('/').pop() : '';
     const fileExtension = fileName ? fileName.split('.').pop().toLowerCase() : '';
 
-    // Generate proper preview URL - FIXED APPROACH
+    // Generate proper preview URL
     const getPreviewUrl = () => {
-      // Always use the API preview endpoint for consistency
       const previewUrl = `${API}/resources/${previewResource.resource_id}/preview`;
       console.log('Using preview URL:', previewUrl);
       return previewUrl;
@@ -336,7 +583,7 @@ const SchoolResourceCategory = ({ user }) => {
       }
       
       return (
-        <div style={{ width: '100%', height: '600px', overflow: 'hidden' }}>
+        <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
           <iframe
             ref={iframeRef}
             src={previewUrl}
@@ -344,7 +591,11 @@ const SchoolResourceCategory = ({ user }) => {
               width: '100%',
               height: '100%',
               border: 'none',
-              borderRadius: '8px'
+              borderRadius: '8px',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              zIndex: 1
             }}
             title={previewResource.name}
             onLoad={() => {
@@ -357,6 +608,19 @@ const SchoolResourceCategory = ({ user }) => {
               message.error('Failed to load PDF preview. Try downloading instead.');
             }}
           />
+          {category !== 'multimedia' && logoUrl && (
+            <LogoOverlay
+              logoUrl={logoUrl}
+              logoPosition={logoPosition}
+              isEditingLogo={isEditingLogo}
+              isDraggingLogo={isDraggingLogo}
+              setIsDraggingLogo={setIsDraggingLogo}
+              handleLogoDrag={handleLogoDrag}
+              showControls={showLogoControls}
+              handleLogoResize={handleLogoResize}
+              handleLogoOpacityChange={handleLogoOpacityChange}
+            />
+          )}
         </div>
       );
     }
@@ -370,15 +634,26 @@ const SchoolResourceCategory = ({ user }) => {
       }
       
       return (
-        <div style={{ textAlign: 'center', maxHeight: '600px', overflow: 'auto' }}>
+        <div 
+          style={{ 
+            textAlign: 'center', 
+            maxHeight: '100%', 
+            overflow: 'auto',
+            position: 'relative',
+            height: '100%',
+            width: '100%'
+          }}
+        >
           <img
             src={previewUrl}
             alt={previewResource.name}
             style={{
               maxWidth: '100%',
-              maxHeight: '600px',
+              maxHeight: '100%',
               objectFit: 'contain',
-              borderRadius: '8px'
+              borderRadius: '8px',
+              position: 'relative',
+              zIndex: 1
             }}
             onLoad={() => {
               console.log('Image loaded successfully');
@@ -396,6 +671,19 @@ const SchoolResourceCategory = ({ user }) => {
               }
             }}
           />
+          {category !== 'multimedia' && logoUrl && (
+            <LogoOverlay
+              logoUrl={logoUrl}
+              logoPosition={logoPosition}
+              isEditingLogo={isEditingLogo}
+              isDraggingLogo={isDraggingLogo}
+              setIsDraggingLogo={setIsDraggingLogo}
+              handleLogoDrag={handleLogoDrag}
+              showControls={showLogoControls}
+              handleLogoResize={handleLogoResize}
+              handleLogoOpacityChange={handleLogoOpacityChange}
+            />
+          )}
         </div>
       );
     }
@@ -477,14 +765,18 @@ const SchoolResourceCategory = ({ user }) => {
     const docExtensions = ['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'];
     if (docExtensions.includes(fileExtension)) {
       return (
-        <div style={{ width: '100%', height: '600px', overflow: 'hidden' }}>
+        <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
           <iframe
             src={previewUrl}
             style={{
               width: '100%',
               height: '100%',
               border: 'none',
-              borderRadius: '8px'
+              borderRadius: '8px',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              zIndex: 1
             }}
             title={`Preview - ${previewResource.name}`}
             onLoad={() => setPreviewLoading(false)}
@@ -497,6 +789,19 @@ const SchoolResourceCategory = ({ user }) => {
               }
             }}
           />
+          {category !== 'multimedia' && logoUrl && (
+            <LogoOverlay
+              logoUrl={logoUrl}
+              logoPosition={logoPosition}
+              isEditingLogo={isEditingLogo}
+              isDraggingLogo={isDraggingLogo}
+              setIsDraggingLogo={setIsDraggingLogo}
+              handleLogoDrag={handleLogoDrag}
+              showControls={showLogoControls}
+              handleLogoResize={handleLogoResize}
+              handleLogoOpacityChange={handleLogoOpacityChange}
+            />
+          )}
         </div>
       );
     }
@@ -1125,7 +1430,7 @@ const SchoolResourceCategory = ({ user }) => {
         </Form>
       </Modal>
 
-      {/* Preview Modal - UPDATED FOR FULL SCREEN */}
+      {/* Preview Modal */}
       <Modal
         title={
           <div>
@@ -1147,6 +1452,7 @@ const SchoolResourceCategory = ({ user }) => {
           setIsPreviewModalVisible(false);
           setPreviewResource(null);
           setPreviewLoading(false);
+          setIsEditingLogo(false);
         }}
         footer={[
           <Button
@@ -1155,10 +1461,44 @@ const SchoolResourceCategory = ({ user }) => {
               setIsPreviewModalVisible(false);
               setPreviewResource(null);
               setPreviewLoading(false);
+              setIsEditingLogo(false);
             }}
           >
             Close
           </Button>,
+          category !== 'multimedia' && logoUrl && (
+            <>
+              {isEditingLogo ? (
+                <>
+                  <Button
+                    key="save"
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    onClick={saveLogoPosition}
+                    loading={positionLoading}
+                  >
+                    Save Position
+                  </Button>
+                  <Button
+                    key="reset"
+                    icon={<UndoOutlined />}
+                    onClick={resetLogoPosition}
+                    disabled={isDefaultPosition}
+                  >
+                    Reset
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  key="editLogo"
+                  icon={<EditOutlined />}
+                  onClick={() => setIsEditingLogo(true)}
+                >
+                  Position Logo
+                </Button>
+              )}
+            </>
+          ),
           <Button
             key="download"
             type="primary"
@@ -1170,7 +1510,7 @@ const SchoolResourceCategory = ({ user }) => {
           >
             Download
           </Button>
-        ]}
+        ].filter(Boolean)}
         width="90%"
         style={{ top: 20 }}
         bodyStyle={{ 

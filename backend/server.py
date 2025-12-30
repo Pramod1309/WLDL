@@ -20,7 +20,7 @@ from jose import JWTError, jwt
 from database import (
     get_db, Admin, School, PasswordResetToken, ActivityLog, Resource, 
     Announcement, SupportTicket, ChatMessage, ResourceDownload, 
-    KnowledgeArticle, engine, Base
+    KnowledgeArticle, SchoolLogoPosition, engine, Base
 )
 from init_db import init_database
 
@@ -190,6 +190,13 @@ class KnowledgeArticleResponse(BaseModel):
     is_published: bool
     created_at: datetime
     updated_at: datetime
+
+class LogoPosition(BaseModel):
+    resource_id: str
+    x_position: int  # Percentage from left (0-100)
+    y_position: int  # Percentage from top (0-100)
+    width: int  # Width percentage (5-50)
+    opacity: float  # Opacity (0.1-1.0)
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
@@ -1154,6 +1161,117 @@ async def delete_article(article_id: int, db: Session = Depends(get_db)):
     db.commit()
     
     return {"message": "Article deleted"}
+
+# ==================== LOGO POSITIONING ROUTES ====================
+
+@api_router.post("/school/logo-position")
+async def save_logo_position(
+    school_id: str,
+    resource_id: str,
+    x_position: int = Form(...),
+    y_position: int = Form(...),
+    width: int = Form(...),
+    opacity: float = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Save or update logo position for a specific resource"""
+    # Check if resource exists
+    resource = db.query(Resource).filter(Resource.resource_id == resource_id).first()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    
+    # Check if school has access to this resource
+    if resource.uploaded_by_type == 'school' and resource.uploaded_by_id != school_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Validate values
+    if not (0 <= x_position <= 100):
+        raise HTTPException(status_code=400, detail="X position must be between 0 and 100")
+    if not (0 <= y_position <= 100):
+        raise HTTPException(status_code=400, detail="Y position must be between 0 and 100")
+    if not (5 <= width <= 50):
+        raise HTTPException(status_code=400, detail="Width must be between 5 and 50")
+    if not (0.1 <= opacity <= 1.0):
+        raise HTTPException(status_code=400, detail="Opacity must be between 0.1 and 1.0")
+    
+    # Check if position already exists
+    existing_position = db.query(SchoolLogoPosition).filter(
+        SchoolLogoPosition.school_id == school_id,
+        SchoolLogoPosition.resource_id == resource_id
+    ).first()
+    
+    if existing_position:
+        # Update existing position
+        existing_position.x_position = x_position
+        existing_position.y_position = y_position
+        existing_position.width = width
+        existing_position.opacity = opacity
+        existing_position.updated_at = datetime.utcnow()
+        message = "Logo position updated successfully"
+    else:
+        # Create new position
+        new_position = SchoolLogoPosition(
+            school_id=school_id,
+            resource_id=resource_id,
+            x_position=x_position,
+            y_position=y_position,
+            width=width,
+            opacity=opacity
+        )
+        db.add(new_position)
+        message = "Logo position saved successfully"
+    
+    db.commit()
+    return {"message": message}
+
+@api_router.get("/school/logo-position/{resource_id}")
+async def get_logo_position(
+    school_id: str,
+    resource_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get saved logo position for a specific resource"""
+    position = db.query(SchoolLogoPosition).filter(
+        SchoolLogoPosition.school_id == school_id,
+        SchoolLogoPosition.resource_id == resource_id
+    ).first()
+    
+    if not position:
+        # Return default position
+        return {
+            "x_position": 50,
+            "y_position": 10,
+            "width": 20,
+            "opacity": 0.7,
+            "is_default": True
+        }
+    
+    return {
+        "x_position": position.x_position,
+        "y_position": position.y_position,
+        "width": position.width,
+        "opacity": position.opacity,
+        "is_default": False,
+        "updated_at": position.updated_at.isoformat() if position.updated_at else None
+    }
+
+@api_router.delete("/school/logo-position/{resource_id}")
+async def reset_logo_position(
+    school_id: str,
+    resource_id: str,
+    db: Session = Depends(get_db)
+):
+    """Reset logo position to default"""
+    position = db.query(SchoolLogoPosition).filter(
+        SchoolLogoPosition.school_id == school_id,
+        SchoolLogoPosition.resource_id == resource_id
+    ).first()
+    
+    if position:
+        db.delete(position)
+        db.commit()
+    
+    return {"message": "Logo position reset to default"}
 
 # ==================== ANALYTICS ROUTES ====================
 

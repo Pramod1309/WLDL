@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 from pathlib import Path
+from sqlalchemy import UniqueConstraint
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -157,6 +158,24 @@ class KnowledgeArticle(Base):
     is_published = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+# School Logo Position Model
+class SchoolLogoPosition(Base):
+    __tablename__ = "school_logo_positions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    school_id = Column(String(100), nullable=False, index=True)
+    resource_id = Column(String(100), nullable=False, index=True)
+    x_position = Column(Integer, default=50)  # Percentage from left
+    y_position = Column(Integer, default=10)  # Percentage from top
+    width = Column(Integer, default=20)  # Width percentage
+    opacity = Column(Float, default=0.7)  # Opacity level
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        UniqueConstraint('school_id', 'resource_id', name='unique_school_resource_logo'),
+    )
 
 # Dependency to get DB session
 def get_db():
@@ -165,3 +184,4 @@ def get_db():
         yield db
     finally:
         db.close()
+
