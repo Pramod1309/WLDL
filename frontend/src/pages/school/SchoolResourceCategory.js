@@ -277,6 +277,8 @@ const SchoolResourceCategory = ({ user }) => {
         params: { school_id: user.school_id }
       });
       
+      console.log('Fetched logo position:', response.data);
+      
       setLogoPosition({
         x: response.data.x_position,
         y: response.data.y_position,
@@ -291,6 +293,9 @@ const SchoolResourceCategory = ({ user }) => {
           ? user.logo_path 
           : `${BACKEND_URL}${user.logo_path}`;
         setLogoUrl(fullLogoUrl);
+        console.log('School logo URL:', fullLogoUrl);
+      } else {
+        console.log('No logo path for user');
       }
     } catch (error) {
       console.error('Error fetching logo position:', error);
@@ -307,22 +312,35 @@ const SchoolResourceCategory = ({ user }) => {
     if (!previewResource || category === 'multimedia') return;
     
     try {
-      await axios.post(`${API}/school/logo-position`, {
+      console.log('Saving logo position with data:', {
         school_id: user.school_id,
         resource_id: previewResource.resource_id,
-        x_position: logoPosition.x,
-        y_position: logoPosition.y,
-        width: logoPosition.width,
-        opacity: logoPosition.opacity
-      }, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        logoPosition: logoPosition
       });
+      
+      // Create FormData object
+      const formData = new FormData();
+      formData.append('school_id', user.school_id);
+      formData.append('resource_id', previewResource.resource_id);
+      formData.append('x_position', logoPosition.x.toString());
+      formData.append('y_position', logoPosition.y.toString());
+      formData.append('width', logoPosition.width.toString());
+      formData.append('opacity', logoPosition.opacity.toString());
+      
+      const response = await axios.post(`${API}/school/logo-position`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      
+      console.log('Save logo position response:', response.data);
       
       setIsEditingLogo(false);
       setIsDefaultPosition(false);
-      message.success('Logo position saved!');
+      message.success('Logo position saved successfully!');
     } catch (error) {
       console.error('Error saving logo position:', error);
+      console.error('Error response:', error.response?.data);
       message.error('Failed to save logo position');
     }
   };
@@ -332,6 +350,8 @@ const SchoolResourceCategory = ({ user }) => {
     if (!previewResource || category === 'multimedia') return;
     
     try {
+      console.log('Resetting logo position for resource:', previewResource.resource_id);
+      
       await axios.delete(`${API}/school/logo-position/${previewResource.resource_id}`, {
         params: { school_id: user.school_id }
       });
@@ -423,12 +443,12 @@ const SchoolResourceCategory = ({ user }) => {
       const token = localStorage.getItem('token');
       
       // Create the download URL with school info
-      const downloadUrl = `${API}/resources/${record.resource_id}/download`;
+      const downloadUrl = `${API}/resources/${record.resource_id}/download-with-logo`;
       const urlWithParams = new URL(downloadUrl);
       urlWithParams.searchParams.append('school_id', user.school_id);
       urlWithParams.searchParams.append('school_name', user.name);
       
-      console.log('Download URL:', urlWithParams.toString());
+      console.log('Download URL with logo:', urlWithParams.toString());
       
       // Create a temporary link element for downloading
       const downloadLink = document.createElement('a');
@@ -504,7 +524,7 @@ const SchoolResourceCategory = ({ user }) => {
           )
         );
         
-        message.success('Download started!');
+        message.success('Download started with school branding!');
       } catch (fetchError) {
         console.error('Error downloading via fetch:', fetchError);
         
@@ -520,7 +540,7 @@ const SchoolResourceCategory = ({ user }) => {
           )
         );
         
-        message.info('Opening download in new tab...');
+        message.info('Opening branded download in new tab...');
       }
     } catch (error) {
       console.error('Error in handleDownload:', error);
@@ -1508,7 +1528,7 @@ const SchoolResourceCategory = ({ user }) => {
             }}
             disabled={previewResource?.is_own_upload && previewResource?.display_status !== 'approved'}
           >
-            Download
+            Download with branding
           </Button>
         ].filter(Boolean)}
         width="90%"
