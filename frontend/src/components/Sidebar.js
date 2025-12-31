@@ -1,6 +1,7 @@
 import React from 'react';
 import { Layout, Menu, theme } from 'antd';
 import { 
+  DownloadOutlined,
   DashboardOutlined, 
   BankOutlined, 
   FileOutlined,
@@ -16,7 +17,6 @@ import {
   QuestionCircleOutlined,
   SettingOutlined,
   UserOutlined,
-  DownOutlined,
   LineChartOutlined,
   NotificationOutlined,
   CommentOutlined,
@@ -26,27 +26,41 @@ import {
   SafetyCertificateOutlined,
   CloudUploadOutlined
 } from '@ant-design/icons';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom'; // ADDED useNavigate
 import '../styles/Sidebar.css';
 
 const { Sider } = Layout;
 
 const Sidebar = ({ collapsed, onCollapse }) => {
+  const navigate = useNavigate(); // Now this will work
   const location = useLocation();
+  
+  const handleMenuClick = (path) => {
+    navigate(path);
+  };
+
   const {
     token: { colorBgContainer },
   } = theme.useToken();
 
   const menuItems = [
     {
+      key: 'batch-watermark',
+      icon: <DownloadOutlined />,
+      label: 'Batch Watermark',
+      onClick: () => handleMenuClick('/admin/batch-watermark')
+    },
+    {
       key: 'dashboard',
       icon: <DashboardOutlined />,
-      label: <Link to="/admin">Dashboard Home</Link>,
+      label: 'Dashboard Home',
+      onClick: () => handleMenuClick('/admin')
     },
     {
       key: 'schools',
       icon: <BankOutlined />,
-      label: <Link to="/admin/schools">School Management</Link>,
+      label: 'School Management',
+      onClick: () => handleMenuClick('/admin/schools')
     },
     {
       key: 'resources',
@@ -56,37 +70,44 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         {
           key: 'all_resources',
           icon: <FileTextOutlined />,
-          label: <Link to="/admin/resources">All Resources</Link>,
+          label: 'All Resources',
+          onClick: () => handleMenuClick('/admin/resources')
         },
         {
           key: 'academic',
           icon: <BookOutlined />,
-          label: <Link to="/admin/resources/academic">Academic Resources</Link>,
+          label: 'Academic Resources',
+          onClick: () => handleMenuClick('/admin/resources/academic')
         },
         {
           key: 'marketing',
           icon: <FileImageOutlined />,
-          label: <Link to="/admin/resources/marketing">Marketing Resources</Link>,
+          label: 'Marketing Resources',
+          onClick: () => handleMenuClick('/admin/resources/marketing')
         },
         {
           key: 'administrative',
           icon: <FileTextOutlined />,
-          label: <Link to="/admin/resources/administrative">Administrative</Link>,
+          label: 'Administrative',
+          onClick: () => handleMenuClick('/admin/resources/administrative')
         },
         {
           key: 'training',
           icon: <FileWordOutlined />,
-          label: <Link to="/admin/resources/training">Training Resources</Link>,
+          label: 'Training Resources',
+          onClick: () => handleMenuClick('/admin/resources/training')
         },
         {
           key: 'event',
           icon: <FilePptOutlined />,
-          label: <Link to="/admin/resources/event">Event & Celebration</Link>,
+          label: 'Event & Celebration',
+          onClick: () => handleMenuClick('/admin/resources/event')
         },
         {
           key: 'multimedia',
           icon: <VideoCameraOutlined />,
-          label: <Link to="/admin/resources/multimedia">Multimedia Collection</Link>,
+          label: 'Multimedia Collection',
+          onClick: () => handleMenuClick('/admin/resources/multimedia')
         }
       ],
     },
@@ -98,22 +119,26 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         {
           key: 'school_activity',
           icon: <LineChartOutlined />,
-          label: <Link to="/admin/analytics/school-activity">School Activity</Link>,
+          label: 'School Activity',
+          onClick: () => handleMenuClick('/admin/analytics/school-activity')
         },
         {
           key: 'resource_analytics',
           icon: <FileSearchOutlined />,
-          label: <Link to="/admin/analytics/resource-analytics">Resource Analytics</Link>,
+          label: 'Resource Analytics',
+          onClick: () => handleMenuClick('/admin/analytics/resource-analytics')
         },
         {
           key: 'search_analytics',
           icon: <FileSearchOutlined />,
-          label: <Link to="/admin/analytics/search-analytics">Search Analytics</Link>,
+          label: 'Search Analytics',
+          onClick: () => handleMenuClick('/admin/analytics/search-analytics')
         },
         {
           key: 'download_tracking',
           icon: <CloudUploadOutlined />,
-          label: <Link to="/admin/analytics/download-tracking">Download Tracking</Link>,
+          label: 'Download Tracking',
+          onClick: () => handleMenuClick('/admin/analytics/download-tracking')
         },
       ],
     },
@@ -125,12 +150,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         {
           key: 'announcements',
           icon: <NotificationOutlined />,
-          label: <Link to="/admin/communication/announcements">Announcements</Link>,
+          label: 'Announcements',
+          onClick: () => handleMenuClick('/admin/communication/announcements')
         },
         {
           key: 'chat',
           icon: <CommentOutlined />,
-          label: <Link to="/admin/communication/chat">Chat with Schools</Link>,
+          label: 'Chat with Schools',
+          onClick: () => handleMenuClick('/admin/communication/chat')
         },
       ],
     },
@@ -142,12 +169,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         {
           key: 'tickets',
           icon: <FileDoneOutlined />,
-          label: <Link to="/admin/support/tickets">Support Tickets</Link>,
+          label: 'Support Tickets',
+          onClick: () => handleMenuClick('/admin/support/tickets')
         },
         {
           key: 'knowledge_base',
           icon: <FileTextOutlined />,
-          label: <Link to="/admin/support/knowledge-base">Knowledge Base</Link>,
+          label: 'Knowledge Base',
+          onClick: () => handleMenuClick('/admin/support/knowledge-base')
         },
       ],
     },
@@ -159,32 +188,38 @@ const Sidebar = ({ collapsed, onCollapse }) => {
         {
           key: 'profile',
           icon: <UserOutlined />,
-          label: <Link to="/admin/settings/profile">Admin Profile</Link>,
+          label: 'Admin Profile',
+          onClick: () => handleMenuClick('/admin/settings/profile')
         },
         {
           key: 'branding',
           icon: <FileImageOutlined />,
-          label: <Link to="/admin/settings/branding">Branding</Link>,
+          label: 'Branding',
+          onClick: () => handleMenuClick('/admin/settings/branding')
         },
         {
           key: 'cms',
           icon: <FileTextOutlined />,
-          label: <Link to="/admin/settings/cms">Content Management</Link>,
+          label: 'Content Management',
+          onClick: () => handleMenuClick('/admin/settings/cms')
         },
         {
           key: 'admins',
           icon: <TeamOutlined />,
-          label: <Link to="/admin/settings/admins">Admin Users</Link>,
+          label: 'Admin Users',
+          onClick: () => handleMenuClick('/admin/settings/admins')
         },
         {
           key: 'security',
           icon: <SafetyCertificateOutlined />,
-          label: <Link to="/admin/settings/security">Security</Link>,
+          label: 'Security',
+          onClick: () => handleMenuClick('/admin/settings/security')
         },
         {
           key: 'backup',
           icon: <CloudUploadOutlined />,
-          label: <Link to="/admin/settings/backup">Data Backup</Link>,
+          label: 'Data Backup',
+          onClick: () => handleMenuClick('/admin/settings/backup')
         },
       ],
     },
@@ -192,12 +227,14 @@ const Sidebar = ({ collapsed, onCollapse }) => {
 
   const getSelectedKey = () => {
     const path = location.pathname;
+    if (path.includes('batch-watermark')) return ['batch-watermark']; // ADDED this line
     if (path.includes('schools')) return ['schools'];
     if (path.includes('resources')) return ['resources'];
     if (path.includes('analytics')) return ['analytics'];
     if (path.includes('communication')) return ['communication'];
     if (path.includes('support')) return ['support'];
     if (path.includes('settings')) return ['settings'];
+    if (path === '/admin' || path === '/admin/') return ['dashboard'];
     return ['dashboard'];
   };
 

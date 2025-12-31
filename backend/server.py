@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, Form, status, Request, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from dotenv import load_dotenv
 import os
 from starlette.middleware.cors import CORSMiddleware
@@ -11,7 +11,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Union, Dict, Any
 import uuid
 import shutil
 from jose import JWTError, jwt
@@ -20,12 +20,16 @@ import fitz  # PyMuPDF for PDF processing
 from io import BytesIO, StringIO
 import tempfile
 import io
+import zipfile
+import json
+import asyncio
+
 
 # Import database
 from database import (
     get_db, Admin, School, PasswordResetToken, ActivityLog, Resource, 
     Announcement, SupportTicket, ChatMessage, ResourceDownload, 
-    KnowledgeArticle, SchoolLogoPosition, SchoolWatermarkText, engine, Base
+    KnowledgeArticle, SchoolLogoPosition, SchoolWatermarkText, engine, Base, AdminResourceWatermark
 )
 from init_db import init_database
 
@@ -218,6 +222,32 @@ class TextWatermarkPosition(BaseModel):
     contact_size: int
     contact_opacity: float
 
+class WatermarkPosition(BaseModel):
+    logo_x: int = 50
+    logo_y: int = 10
+    logo_width: int = 20
+    logo_opacity: float = 0.7
+    school_name_x: int = 50
+    school_name_y: int = 20
+    school_name_size: int = 16
+    school_name_opacity: float = 0.9
+    contact_x: int = 50
+    contact_y: int = 90
+    contact_size: int = 12
+    contact_opacity: float = 0.8
+
+class BatchWatermarkRequest(BaseModel):
+    resource_id: str
+    school_ids: Union[str, List[str]]  # 'all' or list of school IDs
+    positions: WatermarkPosition
+
+class SaveTemplateRequest(BaseModel):
+    admin_id: str
+    resource_id: str
+    positions: WatermarkPosition
+    is_for_all: bool = False
+
+
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -238,6 +268,578 @@ def verify_token(token: str):
         return payload
     except JWTError:
         return None
+
+# Helper functions for watermarking
+def get_full_file_path(file_path: str) -> str:
+    """Get full file path from relative path"""
+    if file_path.startswith('/'):
+        file_path = file_path[1:]
+    
+    full_path = os.path.join(ROOT_DIR, file_path)
+    
+    if not os.path.exists(full_path):
+        # Try alternative paths
+        alternative_paths = [
+            file_path,
+            os.path.join("uploads", file_path),
+            os.path.join("uploads", file_path.lstrip('/')),
+            os.path.join(ROOT_DIR, "uploads", file_path)
+        ]
+        
+        for alt_path in alternative_paths:
+            test_path = os.path.join(ROOT_DIR, alt_path) if not os.path.isabs(alt_path) else alt_path
+            if os.path.exists(test_path):
+                return test_path
+        
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    return full_path
+
+def get_school_logo_path(school: School) -> str:
+    """Get school logo path"""
+    if school.logo_path:
+        logo_path = school.logo_path
+        if logo_path.startswith('/'):
+            logo_path = logo_path[1:]
+        
+        full_path = os.path.join(ROOT_DIR, logo_path)
+        if os.path.exists(full_path):
+            return full_path
+    
+    return None
+
+def add_watermark_to_pdf(pdf_path: str, school: School, positions: WatermarkPosition) -> str:
+    """Add watermark to PDF with school info"""
+    try:
+        print(f"Adding watermark to PDF for school: {school.school_name}")
+        
+        # Open PDF
+        pdf_document = fitz.open(pdf_path)
+        
+        # Create temp file
+        temp_file = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+        output_path = temp_file.name
+        
+        # Get school logo if available
+        logo_path = get_school_logo_path(school)
+        
+        # Process each page
+        for page_num in range(len(pdf_document)):
+            page = pdf_document[page_num]
+            page_width = page.rect.width
+            page_height = page.rect.height
+            
+            # Add logo if available
+            if logo_path and os.path.exists(logo_path):
+                try:
+                    logo_img = Image.open(logo_path)
+                    if logo_img.mode != 'RGBA':
+                        logo_img = logo_img.convert('RGBA')
+                    
+                    # Apply opacity
+                    if positions.logo_opacity < 1.0:
+                        alpha = logo_img.split()[3]
+                        alpha = alpha.point(lambda p: p * positions.logo_opacity)
+                        logo_img.putalpha(alpha)
+                    
+                    # Resize logo
+                    logo_width_pixels = int(page_width * (positions.logo_width / 100))
+                    aspect_ratio = logo_img.width / logo_img.height
+                    logo_height_pixels = int(logo_width_pixels / aspect_ratio)
+                    logo_img = logo_img.resize((logo_width_pixels, logo_height_pixels), Image.Resampling.LANCZOS)
+                    
+                    # Convert to bytes
+                    logo_bytes = io.BytesIO()
+                    logo_img.save(logo_bytes, format='PNG')
+                    logo_bytes.seek(0)
+                    
+                    # Position logo
+                    x_position = page_width * (positions.logo_x / 100)
+                    y_position = page_height * (positions.logo_y / 100)
+                    
+                    rect = fitz.Rect(
+                        x_position - (logo_width_pixels / 2),
+                        y_position - (logo_height_pixels / 2),
+                        x_position + (logo_width_pixels / 2),
+                        y_position + (logo_height_pixels / 2)
+                    )
+                    
+                    page.insert_image(rect, stream=logo_bytes.getvalue())
+                    print(f"Added logo to page {page_num + 1}")
+                except Exception as e:
+                    print(f"Error adding logo: {e}")
+            
+            # Add school name
+            school_name_x = page_width * (positions.school_name_x / 100)
+            school_name_y = page_height * (positions.school_name_y / 100)
+            
+            # Draw school name
+            try:
+                text = f"{school.school_name}"
+                rect = fitz.Rect(
+                    school_name_x - 200,
+                    school_name_y - 20,
+                    school_name_x + 200,
+                    school_name_y + 20
+                )
+                
+                # Calculate font size based on positions
+                font_size = positions.school_name_size * 0.75  # Convert to points
+                
+                page.insert_textbox(
+                    rect,
+                    text,
+                    fontsize=font_size,
+                    color=(0, 0, 0, positions.school_name_opacity),
+                    align=1  # Center aligned
+                )
+                print(f"Added school name to page {page_num + 1}")
+            except Exception as e:
+                print(f"Error adding school name: {e}")
+            
+            # Add contact info
+            contact_x = page_width * (positions.contact_x / 100)
+            contact_y = page_height * (positions.contact_y / 100)
+            
+            contact_text = f"{school.email}"
+            if school.contact_number:
+                contact_text += f"\n{school.contact_number}"
+            
+            try:
+                contact_rect = fitz.Rect(
+                    contact_x - 200,
+                    contact_y - 30,
+                    contact_x + 200,
+                    contact_y + 30
+                )
+                
+                contact_font_size = positions.contact_size * 0.75  # Convert to points
+                
+                page.insert_textbox(
+                    contact_rect,
+                    contact_text,
+                    fontsize=contact_font_size,
+                    color=(0, 0, 0, positions.contact_opacity),
+                    align=1  # Center aligned
+                )
+                print(f"Added contact info to page {page_num + 1}")
+            except Exception as e:
+                print(f"Error adding contact info: {e}")
+        
+        # Save watermarked PDF
+        pdf_document.save(output_path)
+        pdf_document.close()
+        
+        print(f"Watermarked PDF saved to: {output_path}")
+        return output_path
+        
+    except Exception as e:
+        print(f"Error adding watermark to PDF: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def create_preview_image(resource: Resource, school: School, positions: WatermarkPosition) -> bytes:
+    """Create preview image for non-PDF resources"""
+    try:
+        from PIL import Image, ImageDraw
+        
+        # Create a simple preview image
+        img = Image.new('RGB', (800, 600), color='white')
+        draw = ImageDraw.Draw(img)
+        
+        # Draw resource info
+        from PIL import ImageFont
+        try:
+            font_large = ImageFont.truetype("arial.ttf", 24)
+            font_medium = ImageFont.truetype("arial.ttf", 16)
+            font_small = ImageFont.truetype("arial.ttf", 12)
+        except:
+            font_large = ImageFont.load_default()
+            font_medium = ImageFont.load_default()
+            font_small = ImageFont.load_default()
+        
+        # Title
+        draw.text((400, 50), "Watermark Preview", font=font_large, fill='black', anchor="mm")
+        
+        # Resource info
+        draw.text((400, 100), f"Resource: {resource.name}", font=font_medium, fill='blue', anchor="mm")
+        draw.text((400, 130), f"School: {school.school_name}", font=font_medium, fill='green', anchor="mm")
+        
+        # Draw document area
+        doc_x1, doc_y1 = 100, 200
+        doc_x2, doc_y2 = 700, 500
+        draw.rectangle([doc_x1, doc_y1, doc_x2, doc_y2], outline='gray', width=2)
+        draw.text((400, 180), "Document Area", font=font_small, fill='gray', anchor="mm")
+        
+        # Calculate positions within document area
+        doc_width = doc_x2 - doc_x1
+        doc_height = doc_y2 - doc_y1
+        
+        # Draw logo position
+        logo_x = doc_x1 + (doc_width * positions.logo_x / 100)
+        logo_y = doc_y1 + (doc_height * positions.logo_y / 100)
+        logo_size = 30 * positions.logo_width / 20
+        draw.rectangle(
+            [logo_x - logo_size/2, logo_y - logo_size/2, logo_x + logo_size/2, logo_y + logo_size/2],
+            outline='blue',
+            width=2,
+            fill=(135, 206, 235, int(255 * positions.logo_opacity))
+        )
+        draw.text((logo_x, logo_y), "LOGO", font=font_small, fill='blue', anchor="mm")
+        
+        # Draw school name position
+        name_x = doc_x1 + (doc_width * positions.school_name_x / 100)
+        name_y = doc_y1 + (doc_height * positions.school_name_y / 100)
+        draw.text((name_x, name_y), school.school_name, font=font_medium, fill='green', anchor="mm")
+        draw.circle([name_x, name_y], 3, fill='green')
+        
+        # Draw contact position
+        contact_x = doc_x1 + (doc_width * positions.contact_x / 100)
+        contact_y = doc_y1 + (doc_height * positions.contact_y / 100)
+        contact_text = school.email
+        if school.contact_number:
+            contact_text += f"\n{school.contact_number}"
+        
+        # Split text for drawing
+        lines = contact_text.split('\n')
+        for i, line in enumerate(lines):
+            y_offset = contact_y + (i * 20)
+            draw.text((contact_x, y_offset), line, font=font_small, fill='orange', anchor="mm")
+        draw.circle([contact_x, contact_y], 3, fill='orange')
+        
+        # Legend
+        draw.text((100, 520), "Blue: Logo Position", font=font_small, fill='blue')
+        draw.text((100, 540), "Green: School Name", font=font_small, fill='green')
+        draw.text((100, 560), "Orange: Contact Info", font=font_small, fill='orange')
+        
+        # Convert to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        return img_bytes.getvalue()
+        
+    except Exception as e:
+        print(f"Error creating preview image: {e}")
+        # Return a simple error image
+        img = Image.new('RGB', (800, 600), color='white')
+        draw = ImageDraw.Draw(img)
+        draw.text((400, 300), "Preview Generation Error", fill='red', anchor="mm")
+        
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        return img_bytes.getvalue()
+
+# ==================== BATCH WATERMARK ROUTES ====================
+
+@api_router.post("/admin/generate-watermark-preview")
+async def generate_watermark_preview(
+    request: BatchWatermarkRequest,
+    db: Session = Depends(get_db)
+):
+    """Generate preview of watermarked resource for admin"""
+    try:
+        print(f"Generating preview for resource: {request.resource_id}")
+        
+        # Get resource
+        resource = db.query(Resource).filter(Resource.resource_id == request.resource_id).first()
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        
+        # Get school for preview
+        school = None
+        if request.school_ids == 'all':
+            school = db.query(School).first()
+        elif isinstance(request.school_ids, list) and len(request.school_ids) > 0:
+            school = db.query(School).filter(School.school_id == request.school_ids[0]).first()
+        
+        if not school:
+            raise HTTPException(status_code=404, detail="School not found")
+        
+        print(f"Using school: {school.school_name}")
+        
+        # Try to get the actual file
+        try:
+            file_path = get_full_file_path(resource.file_path)
+            print(f"File path: {file_path}")
+            
+            # For PDF files, create actual watermarked version
+            if resource.file_type and 'pdf' in resource.file_type.lower():
+                watermarked_pdf = add_watermark_to_pdf(file_path, school, request.positions)
+                
+                if watermarked_pdf and os.path.exists(watermarked_pdf):
+                    # Read the watermarked PDF
+                    with open(watermarked_pdf, 'rb') as f:
+                        content = f.read()
+                    
+                    # Clean up temp file
+                    os.remove(watermarked_pdf)
+                    
+                    return Response(
+                        content=content,
+                        media_type="application/pdf",
+                        headers={
+                            "Content-Disposition": "inline; filename=\"preview.pdf\""
+                        }
+                    )
+            
+        except Exception as file_error:
+            print(f"File processing error: {file_error}")
+            # Fall back to generated preview image
+        
+        # Generate preview image
+        preview_image = create_preview_image(resource, school, request.positions)
+        
+        return Response(
+            content=preview_image,
+            media_type="image/png",
+            headers={
+                "Content-Disposition": "inline; filename=\"preview.png\""
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error generating preview: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/admin/save-watermark-template")
+async def save_watermark_template(
+    request: SaveTemplateRequest,
+    db: Session = Depends(get_db)
+):
+    """Save watermark template for future use"""
+    try:
+        print(f"Saving template for resource: {request.resource_id}")
+        
+        # Check if template already exists
+        existing = db.query(AdminResourceWatermark).filter(
+            AdminResourceWatermark.admin_id == request.admin_id,
+            AdminResourceWatermark.resource_id == request.resource_id,
+            AdminResourceWatermark.school_id == ('all' if request.is_for_all else 'template')
+        ).first()
+        
+        if existing:
+            # Update existing template
+            existing.logo_x = request.positions.logo_x
+            existing.logo_y = request.positions.logo_y
+            existing.logo_width = request.positions.logo_width
+            existing.logo_opacity = request.positions.logo_opacity
+            existing.school_name_x = request.positions.school_name_x
+            existing.school_name_y = request.positions.school_name_y
+            existing.school_name_size = request.positions.school_name_size
+            existing.school_name_opacity = request.positions.school_name_opacity
+            existing.contact_x = request.positions.contact_x
+            existing.contact_y = request.positions.contact_y
+            existing.contact_size = request.positions.contact_size
+            existing.contact_opacity = request.positions.contact_opacity
+            existing.updated_at = datetime.utcnow()
+            message = "Template updated successfully"
+        else:
+            # Create new template
+            watermark = AdminResourceWatermark(
+                admin_id=request.admin_id,
+                resource_id=request.resource_id,
+                school_id='all' if request.is_for_all else 'template',
+                logo_x=request.positions.logo_x,
+                logo_y=request.positions.logo_y,
+                logo_width=request.positions.logo_width,
+                logo_opacity=request.positions.logo_opacity,
+                school_name_x=request.positions.school_name_x,
+                school_name_y=request.positions.school_name_y,
+                school_name_size=request.positions.school_name_size,
+                school_name_opacity=request.positions.school_name_opacity,
+                contact_x=request.positions.contact_x,
+                contact_y=request.positions.contact_y,
+                contact_size=request.positions.contact_size,
+                contact_opacity=request.positions.contact_opacity
+            )
+            db.add(watermark)
+            message = "Template saved successfully"
+        
+        db.commit()
+        print(f"Template saved: {message}")
+        
+        return {"message": message, "status": "success"}
+        
+    except Exception as e:
+        db.rollback()
+        print(f"Error saving template: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/admin/download-batch-watermarked")
+async def download_batch_watermarked(
+    request: BatchWatermarkRequest,
+    db: Session = Depends(get_db)
+):
+    """Download multiple watermarked resources as ZIP"""
+    try:
+        print(f"Batch download for resource: {request.resource_id}")
+        
+        # Get resource
+        resource = db.query(Resource).filter(Resource.resource_id == request.resource_id).first()
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        
+        # Get schools
+        schools = []
+        if request.school_ids == 'all':
+            schools = db.query(School).all()
+        elif isinstance(request.school_ids, list):
+            schools = db.query(School).filter(School.school_id.in_(request.school_ids)).all()
+        
+        if not schools:
+            raise HTTPException(status_code=404, detail="No schools found")
+        
+        print(f"Processing {len(schools)} schools")
+        
+        # Create temporary directory for watermarked files
+        temp_dir = tempfile.mkdtemp()
+        zip_filename = f"{resource.name.replace(' ', '_')}_watermarked_schools.zip"
+        zip_path = os.path.join(temp_dir, zip_filename)
+        
+        # Create ZIP file
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for i, school in enumerate(schools):
+                try:
+                    print(f"Processing school {i+1}/{len(schools)}: {school.school_name}")
+                    
+                    # Get original file
+                    file_path = get_full_file_path(resource.file_path)
+                    
+                    # Create watermarked version (only for PDFs for now)
+                    if resource.file_type and 'pdf' in resource.file_type.lower():
+                        watermarked_file = add_watermark_to_pdf(file_path, school, request.positions)
+                        
+                        if watermarked_file and os.path.exists(watermarked_file):
+                            # Add to ZIP with school folder structure
+                            school_folder = school.school_name.replace('/', '_').replace('\\', '_')
+                            arcname = f"{school_folder}/{resource.name.replace(' ', '_')}.pdf"
+                            zipf.write(watermarked_file, arcname)
+                            
+                            # Clean up temp file
+                            os.remove(watermarked_file)
+                            print(f"Added to ZIP: {arcname}")
+                        else:
+                            print(f"Failed to watermark for school: {school.school_name}")
+                    else:
+                        print(f"Skipping non-PDF file for school: {school.school_name}")
+                        # For non-PDF files, add original
+                        school_folder = school.school_name.replace('/', '_').replace('\\', '_')
+                        file_extension = resource.file_type.split('/')[-1] if resource.file_type else 'file'
+                        arcname = f"{school_folder}/{resource.name.replace(' ', '_')}.{file_extension}"
+                        zipf.write(file_path, arcname)
+                
+                except Exception as e:
+                    print(f"Error processing school {school.school_name}: {e}")
+                    continue
+        
+        # Read ZIP file
+        with open(zip_path, 'rb') as f:
+            zip_content = f.read()
+        
+        # Clean up
+        try:
+            os.remove(zip_path)
+            os.rmdir(temp_dir)
+        except:
+            pass
+        
+        print(f"ZIP created successfully: {len(zip_content)} bytes")
+        
+        return Response(
+            content=zip_content,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f"attachment; filename={zip_filename}",
+                "Content-Type": "application/zip"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error creating batch download: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@api_router.post("/admin/download-watermarked-resource")
+async def download_watermarked_resource(
+    request: BatchWatermarkRequest,
+    db: Session = Depends(get_db)
+):
+    """Download single watermarked resource for a specific school"""
+    try:
+        print(f"Single download for resource: {request.resource_id}")
+        
+        # Get resource
+        resource = db.query(Resource).filter(Resource.resource_id == request.resource_id).first()
+        if not resource:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        
+        # Get school (assuming school_ids is a single school ID string or first in list)
+        school_id = None
+        if isinstance(request.school_ids, str) and request.school_ids != 'all':
+            school_id = request.school_ids
+        elif isinstance(request.school_ids, list) and len(request.school_ids) > 0:
+            school_id = request.school_ids[0]
+        else:
+            raise HTTPException(status_code=400, detail="School ID required")
+        
+        school = db.query(School).filter(School.school_id == school_id).first()
+        if not school:
+            raise HTTPException(status_code=404, detail="School not found")
+        
+        print(f"Processing for school: {school.school_name}")
+        
+        # Get original file
+        file_path = get_full_file_path(resource.file_path)
+        
+        # Create watermarked version
+        watermarked_file = None
+        if resource.file_type and 'pdf' in resource.file_type.lower():
+            watermarked_file = add_watermark_to_pdf(file_path, school, request.positions)
+        else:
+            # For non-PDF files, return original with note
+            # You could implement image watermarking here
+            watermarked_file = file_path
+        
+        if not watermarked_file or not os.path.exists(watermarked_file):
+            raise HTTPException(status_code=500, detail="Failed to create watermarked file")
+        
+        # Read file
+        with open(watermarked_file, 'rb') as f:
+            content = f.read()
+        
+        # Clean up temp file if it was created
+        if watermarked_file != file_path and os.path.exists(watermarked_file):
+            os.remove(watermarked_file)
+        
+        # Determine filename
+        file_extension = resource.file_type.split('/')[-1] if resource.file_type else 'pdf'
+        filename = f"{resource.name.replace(' ', '_')}_{school.school_name.replace(' ', '_')}.{file_extension}"
+        
+        return Response(
+            content=content,
+            media_type=resource.file_type or "application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": resource.file_type or "application/octet-stream"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error downloading watermarked resource: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Authentication Routes
 @api_router.post("/admin/login", response_model=LoginResponse)

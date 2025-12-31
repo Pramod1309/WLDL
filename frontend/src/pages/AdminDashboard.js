@@ -36,7 +36,7 @@ import ContentManagement from '../components/Settings/ContentManagement';
 import AdminUsers from '../components/Settings/AdminUsers';
 import Security from '../components/Settings/Security';
 import DataBackup from '../components/Settings/DataBackup';
-
+import AdminResourceWatermark from '../components/AdminResourceWatermark';
 import '../styles/AdminDashboard.css';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -443,6 +443,7 @@ const AdminDashboard = ({ user, setUser }) => {
           <Routes>
             <Route path="/" element={<DashboardHome />} />
             <Route path="/schools" element={renderSchoolManagement()} />
+            <Route path="/batch-watermark" element={<AdminResourceWatermark />} />
             
             {/* Resource Management */}
             <Route path="/resources" element={<ResourceManagement />}>

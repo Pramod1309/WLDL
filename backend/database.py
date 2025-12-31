@@ -177,6 +177,39 @@ class SchoolLogoPosition(Base):
     __table_args__ = (
         UniqueConstraint('school_id', 'resource_id', name='unique_school_resource_logo'),
     )
+    
+# Add this model after SchoolLogoPosition model
+class AdminResourceWatermark(Base):
+    __tablename__ = "admin_resource_watermarks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    admin_id = Column(String(100), nullable=False, index=True)
+    resource_id = Column(String(100), nullable=False, index=True)
+    school_id = Column(String(100), nullable=False, index=True)  # 'all' for all schools
+    
+    # Logo positioning
+    logo_x = Column(Integer, default=50)
+    logo_y = Column(Integer, default=10)
+    logo_width = Column(Integer, default=20)
+    logo_opacity = Column(Float, default=0.7)
+    
+    # School info positioning
+    school_name_x = Column(Integer, default=50)
+    school_name_y = Column(Integer, default=20)
+    school_name_size = Column(Integer, default=16)
+    school_name_opacity = Column(Float, default=0.9)
+    
+    contact_x = Column(Integer, default=50)
+    contact_y = Column(Integer, default=90)
+    contact_size = Column(Integer, default=12)
+    contact_opacity = Column(Float, default=0.8)
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        UniqueConstraint('admin_id', 'resource_id', 'school_id', name='unique_admin_resource_school_watermark'),
+    )
 
 # School Watermark Text Model - NEW TABLE
 class SchoolWatermarkText(Base):
