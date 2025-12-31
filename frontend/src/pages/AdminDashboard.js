@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Layout, Button, theme } from 'antd';
-import { MenuUnfoldOutlined, MenuFoldOutlined, LogoutOutlined } from '@ant-design/icons';
+import { MenuUnfoldOutlined, MenuFoldOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons';
 import { Routes, Route, useLocation, Navigate, Outlet, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import Sidebar from '../components/Sidebar';
@@ -54,6 +54,7 @@ const AdminDashboard = ({ user, setUser }) => {
       navigate('/');
     }
   }, [navigate]);
+  
   const [collapsed, setCollapsed] = useState(false);
   const [schools, setSchools] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -62,6 +63,7 @@ const AdminDashboard = ({ user, setUser }) => {
     school_id: '',
     school_name: '',
     email: '',
+    contact_number: '',  // ADDED: Contact number field
     password: '',
     logo: null
   });
@@ -113,6 +115,7 @@ const AdminDashboard = ({ user, setUser }) => {
       formDataToSend.append('school_id', formData.school_id);
       formDataToSend.append('school_name', formData.school_name);
       formDataToSend.append('email', formData.email);
+      formDataToSend.append('contact_number', formData.contact_number);  // ADDED
       formDataToSend.append('password', formData.password);
       if (formData.logo) {
         formDataToSend.append('logo', formData.logo);
@@ -129,6 +132,7 @@ const AdminDashboard = ({ user, setUser }) => {
         school_id: '',
         school_name: '',
         email: '',
+        contact_number: '',  // ADDED
         password: '',
         logo: null
       });
@@ -149,6 +153,7 @@ const AdminDashboard = ({ user, setUser }) => {
       const formDataToSend = new FormData();
       if (formData.school_name) formDataToSend.append('school_name', formData.school_name);
       if (formData.email) formDataToSend.append('email', formData.email);
+      if (formData.contact_number !== undefined) formDataToSend.append('contact_number', formData.contact_number);  // ADDED
       if (formData.password) formDataToSend.append('password', formData.password);
       if (formData.logo) formDataToSend.append('logo', formData.logo);
 
@@ -163,6 +168,7 @@ const AdminDashboard = ({ user, setUser }) => {
         school_id: '',
         school_name: '',
         email: '',
+        contact_number: '',  // ADDED
         password: '',
         logo: null
       });
@@ -193,6 +199,7 @@ const AdminDashboard = ({ user, setUser }) => {
       school_id: school.school_id,
       school_name: school.school_name,
       email: school.email,
+      contact_number: school.contact_number || '',  // ADDED
       password: '',
       logo: null
     });
@@ -241,6 +248,12 @@ const AdminDashboard = ({ user, setUser }) => {
                 )}
                 <h3 className="school-name" data-testid={`school-name-${school.school_id}`}>{school.school_name}</h3>
                 <p className="school-email" data-testid={`school-email-${school.school_id}`}>{school.email}</p>
+                {/* ADDED: Contact number display */}
+                {school.contact_number && (
+                  <p className="school-contact" data-testid={`school-contact-${school.school_id}`}>
+                    📞 {school.contact_number}
+                  </p>
+                )}
                 <div className="folder-actions">
                   <button onClick={() => openEditModal(school)} className="edit-btn" data-testid={`edit-btn-${school.school_id}`}>Edit</button>
                   <button onClick={() => handleDeleteSchool(school.school_id)} className="delete-btn" data-testid={`delete-btn-${school.school_id}`}>Delete</button>
@@ -305,6 +318,19 @@ const AdminDashboard = ({ user, setUser }) => {
                 />
               </div>
 
+              {/* ADDED: Contact number field */}
+              <div className="form-group">
+                <label data-testid="school-contact-label">Contact Number (optional)</label>
+                <input
+                  type="tel"
+                  name="contact_number"
+                  data-testid="school-contact-input"
+                  value={formData.contact_number}
+                  onChange={handleInputChange}
+                  placeholder="e.g., +91 1234567890"
+                />
+              </div>
+
               <div className="form-group">
                 <label data-testid="school-password-label">Password {editingSchool && '(leave blank to keep current)'}</label>
                 <input
@@ -343,6 +369,7 @@ const AdminDashboard = ({ user, setUser }) => {
                       school_id: '',
                       school_name: '',
                       email: '',
+                      contact_number: '',  // ADDED
                       password: '',
                       logo: null
                     });

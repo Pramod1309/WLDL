@@ -42,6 +42,7 @@ class School(Base):
     school_name = Column(String(255), nullable=False)
     logo_path = Column(String(500), nullable=True)
     email = Column(String(255), unique=True, index=True, nullable=False)
+    contact_number = Column(String(20), nullable=True)  # NEW: Added contact number field
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -175,6 +176,30 @@ class SchoolLogoPosition(Base):
     
     __table_args__ = (
         UniqueConstraint('school_id', 'resource_id', name='unique_school_resource_logo'),
+    )
+
+# School Watermark Text Model - NEW TABLE
+class SchoolWatermarkText(Base):
+    __tablename__ = "school_watermark_texts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    school_id = Column(String(100), nullable=False, index=True)
+    resource_id = Column(String(100), nullable=False, index=True)
+    # School name position
+    name_x = Column(Integer, default=50)  # Percentage from left
+    name_y = Column(Integer, default=25)  # Percentage from top (below logo)
+    name_size = Column(Integer, default=20)  # Font size in points
+    name_opacity = Column(Float, default=0.8)  # Opacity level
+    # Contact info position (email + phone)
+    contact_x = Column(Integer, default=50)  # Percentage from left
+    contact_y = Column(Integer, default=90)  # Percentage from top (bottom center)
+    contact_size = Column(Integer, default=12)  # Font size in points
+    contact_opacity = Column(Float, default=0.7)  # Opacity level
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        UniqueConstraint('school_id', 'resource_id', name='unique_school_resource_text'),
     )
 
 # Dependency to get DB session

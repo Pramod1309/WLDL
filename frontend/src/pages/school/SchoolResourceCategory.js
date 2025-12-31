@@ -10,7 +10,8 @@ import {
   AudioOutlined, AppstoreOutlined, UnorderedListOutlined, FileTextOutlined,
   LoadingOutlined, UploadOutlined, ClockCircleOutlined,
   EditOutlined, SaveOutlined, UndoOutlined, ExpandOutlined,
-  MinusOutlined, PlusOutlined, EyeInvisibleOutlined
+  MinusOutlined, PlusOutlined, EyeInvisibleOutlined,
+  MailOutlined, PhoneOutlined, UserOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -19,6 +20,204 @@ const API = `${BACKEND_URL}/api`;
 
 const { Option } = Select;
 const { TextArea } = Input;
+
+// TextOverlay Component for school name and contact info
+const TextOverlay = ({ 
+  schoolInfo, 
+  textPosition, 
+  isEditingText, 
+  isDraggingText,
+  setIsDraggingText,
+  handleTextDrag,
+  showControls,
+  handleTextResize,
+  handleTextOpacityChange,
+  containerRef,
+  activeElement
+}) => {
+  if (!schoolInfo.school_name && !schoolInfo.email && !schoolInfo.contact_number) {
+    return null;
+  }
+
+  const renderTextElement = (type, text, x, y, size, opacity) => {
+    const style = {
+      position: 'absolute',
+      left: `${x}%`,
+      top: `${y}%`,
+      transform: 'translate(-50%, -50%)',
+      fontSize: `${size}px`,
+      color: `rgba(0, 0, 0, ${opacity})`,
+      fontWeight: type === 'name' ? 'bold' : 'normal',
+      pointerEvents: isEditingText ? 'auto' : 'none',
+      zIndex: 3,
+      cursor: isEditingText ? (isDraggingText && activeElement === type ? 'grabbing' : 'grab') : 'default',
+      textAlign: 'center',
+      backgroundColor: isEditingText ? 'rgba(255, 255, 255, 0.7)' : 'transparent',
+      padding: isEditingText ? '4px 8px' : '0',
+      borderRadius: isEditingText ? '4px' : '0',
+      border: isEditingText ? '2px dashed #1890ff' : 'none',
+      whiteSpace: 'nowrap'
+    };
+
+    if (type === 'name') {
+      return (
+        <div
+          style={style}
+          onMouseDown={() => isEditingText && setIsDraggingText(type)}
+          onMouseUp={() => setIsDraggingText(null)}
+          onMouseLeave={() => setIsDraggingText(null)}
+          onMouseMove={(e) => containerRef?.current && handleTextDrag(e, containerRef.current, type)}
+        >
+          {text}
+        </div>
+      );
+    } else if (type === 'contact') {
+      return (
+        <div
+          style={style}
+          onMouseDown={() => isEditingText && setIsDraggingText(type)}
+          onMouseUp={() => setIsDraggingText(null)}
+          onMouseLeave={() => setIsDraggingText(null)}
+          onMouseMove={(e) => containerRef?.current && handleTextDrag(e, containerRef.current, type)}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+            {schoolInfo.email && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <MailOutlined style={{ fontSize: `${size - 4}px` }} />
+                <span>{schoolInfo.email}</span>
+              </div>
+            )}
+            {schoolInfo.contact_number && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <PhoneOutlined style={{ fontSize: `${size - 4}px` }} />
+                <span>{schoolInfo.contact_number}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+    
+    return null;
+  };
+
+  return (
+    <>
+      {schoolInfo.school_name && renderTextElement(
+        'name',
+        schoolInfo.school_name,
+        textPosition.name_x,
+        textPosition.name_y,
+        textPosition.name_size,
+        textPosition.name_opacity
+      )}
+      
+      {(schoolInfo.email || schoolInfo.contact_number) && renderTextElement(
+        'contact',
+        '',
+        textPosition.contact_x,
+        textPosition.contact_y,
+        textPosition.contact_size,
+        textPosition.contact_opacity
+      )}
+      
+      {isEditingText && showControls && (
+        <div style={{
+          position: 'absolute',
+          top: '10px',
+          left: '10px',
+          background: 'rgba(255,255,255,0.9)',
+          padding: '10px',
+          borderRadius: '6px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+          zIndex: 4,
+          width: '220px'
+        }}>
+          <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>
+            Text Watermark Controls
+          </div>
+          <div style={{ fontSize: '10px', color: '#666', marginBottom: '8px' }}>
+            Drag text to reposition, use buttons to adjust size/opacity
+          </div>
+          
+          <div style={{ marginBottom: '8px' }}>
+            <div style={{ fontSize: '11px', marginBottom: '4px' }}>School Name:</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '10px' }}>Size:</span>
+              <Button 
+                size="small" 
+                icon={<MinusOutlined />}
+                onClick={() => handleTextResize('name', -2)}
+                disabled={textPosition.name_size <= 8}
+              />
+              <span style={{ fontSize: '10px', minWidth: '20px', textAlign: 'center' }}>
+                {textPosition.name_size}
+              </span>
+              <Button 
+                size="small" 
+                icon={<PlusOutlined />}
+                onClick={() => handleTextResize('name', 2)}
+                disabled={textPosition.name_size >= 40}
+              />
+              <Button 
+                size="small" 
+                icon={<EyeInvisibleOutlined />}
+                onClick={() => handleTextOpacityChange('name', -0.1)}
+                disabled={textPosition.name_opacity <= 0.1}
+              />
+              <span style={{ fontSize: '10px', minWidth: '20px', textAlign: 'center' }}>
+                {(textPosition.name_opacity * 100).toFixed(0)}%
+              </span>
+              <Button 
+                size="small" 
+                icon={<EyeOutlined />}
+                onClick={() => handleTextOpacityChange('name', 0.1)}
+                disabled={textPosition.name_opacity >= 1.0}
+              />
+            </div>
+          </div>
+          
+          <div>
+            <div style={{ fontSize: '11px', marginBottom: '4px' }}>Contact Info:</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '10px' }}>Size:</span>
+              <Button 
+                size="small" 
+                icon={<MinusOutlined />}
+                onClick={() => handleTextResize('contact', -1)}
+                disabled={textPosition.contact_size <= 8}
+              />
+              <span style={{ fontSize: '10px', minWidth: '20px', textAlign: 'center' }}>
+                {textPosition.contact_size}
+              </span>
+              <Button 
+                size="small" 
+                icon={<PlusOutlined />}
+                onClick={() => handleTextResize('contact', 1)}
+                disabled={textPosition.contact_size >= 20}
+              />
+              <Button 
+                size="small" 
+                icon={<EyeInvisibleOutlined />}
+                onClick={() => handleTextOpacityChange('contact', -0.1)}
+                disabled={textPosition.contact_opacity <= 0.1}
+              />
+              <span style={{ fontSize: '10px', minWidth: '20px', textAlign: 'center' }}>
+                {(textPosition.contact_opacity * 100).toFixed(0)}%
+              </span>
+              <Button 
+                size="small" 
+                icon={<EyeOutlined />}
+                onClick={() => handleTextOpacityChange('contact', 0.1)}
+                disabled={textPosition.contact_opacity >= 1.0}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
 
 // LogoOverlay Component - UPDATED with containerRef prop
 const LogoOverlay = ({ 
@@ -31,7 +230,7 @@ const LogoOverlay = ({
   showControls,
   handleLogoResize,
   handleLogoOpacityChange,
-  containerRef // NEW: Container ref for positioning
+  containerRef
 }) => {
   const logoStyle = {
     position: 'absolute',
@@ -156,15 +355,28 @@ const SchoolResourceCategory = ({ user }) => {
   const [positionLoading, setPositionLoading] = useState(false);
   const [isDefaultPosition, setIsDefaultPosition] = useState(true);
   
+  // Text watermark states
+  const [textPosition, setTextPosition] = useState({
+    name_x: 50, name_y: 25, name_size: 20, name_opacity: 0.8,
+    contact_x: 50, contact_y: 90, contact_size: 12, contact_opacity: 0.7
+  });
+  const [isEditingText, setIsEditingText] = useState(false);
+  const [isDraggingText, setIsDraggingText] = useState(null);
+  const [isDefaultText, setIsDefaultText] = useState(true);
+  const [schoolInfo, setSchoolInfo] = useState({});
+  
   const iframeRef = useRef(null);
   const videoRefs = useRef({});
-  const pdfContainerRef = useRef(null); // NEW: Container ref for PDF
-  const imageContainerRef = useRef(null); // NEW: Container ref for images
-  const docContainerRef = useRef(null); // NEW: Container ref for documents
+  const pdfContainerRef = useRef(null);
+  const imageContainerRef = useRef(null);
+  const docContainerRef = useRef(null);
   
   // Add mouse up event listener for dragging
   useEffect(() => {
-    const handleMouseUp = () => setIsDraggingLogo(false);
+    const handleMouseUp = () => {
+      setIsDraggingLogo(false);
+      setIsDraggingText(null);
+    };
     
     window.addEventListener('mouseup', handleMouseUp);
     
@@ -209,6 +421,7 @@ const SchoolResourceCategory = ({ user }) => {
   useEffect(() => {
     console.log(`Category changed to: ${category}`);
     fetchResources();
+    fetchSchoolInfo();
   }, [category, user.school_id]);
 
   const fetchResources = async () => {
@@ -271,6 +484,35 @@ const SchoolResourceCategory = ({ user }) => {
     }
   };
 
+  // Fetch school info including contact number
+  const fetchSchoolInfo = async () => {
+    try {
+      // Use existing user data and fetch additional info
+      const response = await axios.get(`${API}/admin/schools`);
+      const schoolData = response.data.find(s => s.school_id === user.school_id);
+      if (schoolData) {
+        setSchoolInfo({
+          school_name: schoolData.school_name,
+          email: schoolData.email,
+          contact_number: schoolData.contact_number
+        });
+        console.log('School info fetched:', {
+          school_name: schoolData.school_name,
+          email: schoolData.email,
+          contact_number: schoolData.contact_number
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching school info:', error);
+      // Fallback to user data
+      setSchoolInfo({
+        school_name: user.name,
+        email: user.email,
+        contact_number: null
+      });
+    }
+  };
+
   // Fetch logo position for a resource
   const fetchLogoPosition = async (resourceId) => {
     if (!resourceId || category === 'multimedia') return;
@@ -311,6 +553,39 @@ const SchoolResourceCategory = ({ user }) => {
     }
   };
 
+  // Fetch text position for a resource
+  const fetchTextPosition = async (resourceId) => {
+    if (!resourceId || category === 'multimedia') return;
+    
+    try {
+      const response = await axios.get(`${API}/school/text-watermark/${resourceId}`, {
+        params: { school_id: user.school_id }
+      });
+      
+      console.log('Fetched text position:', response.data);
+      
+      setTextPosition({
+        name_x: response.data.name_x,
+        name_y: response.data.name_y,
+        name_size: response.data.name_size,
+        name_opacity: response.data.name_opacity,
+        contact_x: response.data.contact_x,
+        contact_y: response.data.contact_y,
+        contact_size: response.data.contact_size,
+        contact_opacity: response.data.contact_opacity
+      });
+      setIsDefaultText(response.data.is_default);
+    } catch (error) {
+      console.error('Error fetching text position:', error);
+      // Use defaults if error occurs
+      setTextPosition({
+        name_x: 50, name_y: 25, name_size: 20, name_opacity: 0.8,
+        contact_x: 50, contact_y: 90, contact_size: 12, contact_opacity: 0.7
+      });
+      setIsDefaultText(true);
+    }
+  };
+
   // Save logo position
   const saveLogoPosition = async () => {
     if (!previewResource || category === 'multimedia') return;
@@ -321,7 +596,7 @@ const SchoolResourceCategory = ({ user }) => {
         x: Math.round(logoPosition.x),
         y: Math.round(logoPosition.y),
         width: Math.round(logoPosition.width),
-        opacity: Number(logoPosition.opacity.toFixed(2)) // Keep opacity as float with 2 decimals
+        opacity: Number(logoPosition.opacity.toFixed(2))
       };
       
       console.log('Saving logo position with data:', {
@@ -357,6 +632,37 @@ const SchoolResourceCategory = ({ user }) => {
     }
   };
 
+  // Save text position
+  const saveTextPosition = async () => {
+    if (!previewResource || category === 'multimedia') return;
+    
+    try {
+      const formData = new FormData();
+      formData.append('school_id', user.school_id);
+      formData.append('resource_id', previewResource.resource_id);
+      formData.append('name_x', Math.round(textPosition.name_x).toString());
+      formData.append('name_y', Math.round(textPosition.name_y).toString());
+      formData.append('name_size', textPosition.name_size.toString());
+      formData.append('name_opacity', textPosition.name_opacity.toFixed(2));
+      formData.append('contact_x', Math.round(textPosition.contact_x).toString());
+      formData.append('contact_y', Math.round(textPosition.contact_y).toString());
+      formData.append('contact_size', textPosition.contact_size.toString());
+      formData.append('contact_opacity', textPosition.contact_opacity.toFixed(2));
+      
+      const response = await axios.post(`${API}/school/text-watermark`, formData);
+      
+      console.log('Save text position response:', response.data);
+      
+      setIsEditingText(false);
+      setIsDefaultText(false);
+      message.success('Text watermark position saved successfully!');
+    } catch (error) {
+      console.error('Error saving text position:', error);
+      console.error('Error response:', error.response?.data);
+      message.error('Failed to save text position');
+    }
+  };
+
   // Reset logo position to default
   const resetLogoPosition = async () => {
     if (!previewResource || category === 'multimedia') return;
@@ -378,7 +684,29 @@ const SchoolResourceCategory = ({ user }) => {
     }
   };
 
-  // Logo drag handler - UPDATED with container parameter
+  // Reset text position to default
+  const resetTextPosition = async () => {
+    if (!previewResource || category === 'multimedia') return;
+    
+    try {
+      console.log('Resetting text position for resource:', previewResource.resource_id);
+      
+      // Note: You might want to create a DELETE endpoint for text watermark
+      // For now, we'll just reset locally and mark as default
+      setTextPosition({
+        name_x: 50, name_y: 25, name_size: 20, name_opacity: 0.8,
+        contact_x: 50, contact_y: 90, contact_size: 12, contact_opacity: 0.7
+      });
+      setIsDefaultText(true);
+      setIsEditingText(false);
+      message.success('Text watermark position reset to default');
+    } catch (error) {
+      console.error('Error resetting text position:', error);
+      message.error('Failed to reset text position');
+    }
+  };
+
+  // Logo drag handler
   const handleLogoDrag = (e, container) => {
     if (!isDraggingLogo || !container) return;
     
@@ -394,6 +722,24 @@ const SchoolResourceCategory = ({ user }) => {
     setLogoPosition(prev => ({ ...prev, x: boundedX, y: boundedY }));
   };
 
+  // Text drag handler
+  const handleTextDrag = (e, container, elementType) => {
+    if (!isDraggingText || !container) return;
+    
+    const rect = container.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    
+    const boundedX = Math.max(0, Math.min(100, x));
+    const boundedY = Math.max(0, Math.min(100, y));
+    
+    if (elementType === 'name') {
+      setTextPosition(prev => ({ ...prev, name_x: boundedX, name_y: boundedY }));
+    } else if (elementType === 'contact') {
+      setTextPosition(prev => ({ ...prev, contact_x: boundedX, contact_y: boundedY }));
+    }
+  };
+
   // Logo resize handler
   const handleLogoResize = (change) => {
     setLogoPosition(prev => ({
@@ -402,12 +748,42 @@ const SchoolResourceCategory = ({ user }) => {
     }));
   };
 
+  // Text resize handler
+  const handleTextResize = (elementType, change) => {
+    if (elementType === 'name') {
+      setTextPosition(prev => ({
+        ...prev,
+        name_size: Math.max(8, Math.min(40, prev.name_size + change))
+      }));
+    } else if (elementType === 'contact') {
+      setTextPosition(prev => ({
+        ...prev,
+        contact_size: Math.max(8, Math.min(20, prev.contact_size + change))
+      }));
+    }
+  };
+
   // Logo opacity handler
   const handleLogoOpacityChange = (change) => {
     setLogoPosition(prev => ({
       ...prev,
       opacity: Math.max(0.1, Math.min(1.0, prev.opacity + change))
     }));
+  };
+
+  // Text opacity handler
+  const handleTextOpacityChange = (elementType, change) => {
+    if (elementType === 'name') {
+      setTextPosition(prev => ({
+        ...prev,
+        name_opacity: Math.max(0.1, Math.min(1.0, prev.name_opacity + change))
+      }));
+    } else if (elementType === 'contact') {
+      setTextPosition(prev => ({
+        ...prev,
+        contact_opacity: Math.max(0.1, Math.min(1.0, prev.contact_opacity + change))
+      }));
+    }
   };
 
   const handleUpload = async () => {
@@ -570,12 +946,13 @@ const SchoolResourceCategory = ({ user }) => {
       videoRefs.current[record.resource_id].currentTime = 0;
     }
 
-    // Fetch logo position for this resource (except multimedia category)
+    // Fetch logo and text positions for this resource (except multimedia category)
     if (category !== 'multimedia') {
       await fetchLogoPosition(record.resource_id);
+      await fetchTextPosition(record.resource_id);
     }
 
-    // Reduced timeout: Stop loading after 3 seconds if content doesn't load
+    // Stop loading after 3 seconds if content doesn't load
     setTimeout(() => {
       setPreviewLoading(false);
     }, 3000);
@@ -662,6 +1039,21 @@ const SchoolResourceCategory = ({ user }) => {
               containerRef={pdfContainerRef}
             />
           )}
+          {category !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
+            <TextOverlay
+              schoolInfo={schoolInfo}
+              textPosition={textPosition}
+              isEditingText={isEditingText}
+              isDraggingText={isDraggingText}
+              setIsDraggingText={setIsDraggingText}
+              handleTextDrag={handleTextDrag}
+              showControls={showLogoControls}
+              handleTextResize={handleTextResize}
+              handleTextOpacityChange={handleTextOpacityChange}
+              containerRef={pdfContainerRef}
+              activeElement={isDraggingText}
+            />
+          )}
         </div>
       );
     }
@@ -729,6 +1121,21 @@ const SchoolResourceCategory = ({ user }) => {
               handleLogoResize={handleLogoResize}
               handleLogoOpacityChange={handleLogoOpacityChange}
               containerRef={imageContainerRef}
+            />
+          )}
+          {category !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
+            <TextOverlay
+              schoolInfo={schoolInfo}
+              textPosition={textPosition}
+              isEditingText={isEditingText}
+              isDraggingText={isDraggingText}
+              setIsDraggingText={setIsDraggingText}
+              handleTextDrag={handleTextDrag}
+              showControls={showLogoControls}
+              handleTextResize={handleTextResize}
+              handleTextOpacityChange={handleTextOpacityChange}
+              containerRef={imageContainerRef}
+              activeElement={isDraggingText}
             />
           )}
         </div>
@@ -851,6 +1258,21 @@ const SchoolResourceCategory = ({ user }) => {
               handleLogoResize={handleLogoResize}
               handleLogoOpacityChange={handleLogoOpacityChange}
               containerRef={docContainerRef}
+            />
+          )}
+          {category !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
+            <TextOverlay
+              schoolInfo={schoolInfo}
+              textPosition={textPosition}
+              isEditingText={isEditingText}
+              isDraggingText={isDraggingText}
+              setIsDraggingText={setIsDraggingText}
+              handleTextDrag={handleTextDrag}
+              showControls={showLogoControls}
+              handleTextResize={handleTextResize}
+              handleTextOpacityChange={handleTextOpacityChange}
+              containerRef={docContainerRef}
+              activeElement={isDraggingText}
             />
           )}
         </div>
@@ -1504,6 +1926,8 @@ const SchoolResourceCategory = ({ user }) => {
           setPreviewResource(null);
           setPreviewLoading(false);
           setIsEditingLogo(false);
+          setIsEditingText(false);
+          setIsDraggingText(null);
         }}
         footer={[
           <Button
@@ -1513,6 +1937,8 @@ const SchoolResourceCategory = ({ user }) => {
               setPreviewResource(null);
               setPreviewLoading(false);
               setIsEditingLogo(false);
+              setIsEditingText(false);
+              setIsDraggingText(null);
             }}
           >
             Close
@@ -1522,21 +1948,21 @@ const SchoolResourceCategory = ({ user }) => {
               {isEditingLogo ? (
                 <>
                   <Button
-                    key="save"
+                    key="saveLogo"
                     type="primary"
                     icon={<SaveOutlined />}
                     onClick={saveLogoPosition}
                     loading={positionLoading}
                   >
-                    Save Position
+                    Save Logo Position
                   </Button>
                   <Button
-                    key="reset"
+                    key="resetLogo"
                     icon={<UndoOutlined />}
                     onClick={resetLogoPosition}
                     disabled={isDefaultPosition}
                   >
-                    Reset
+                    Reset Logo
                   </Button>
                 </>
               ) : (
@@ -1546,6 +1972,38 @@ const SchoolResourceCategory = ({ user }) => {
                   onClick={() => setIsEditingLogo(true)}
                 >
                   Position Logo
+                </Button>
+              )}
+            </>
+          ),
+          category !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
+            <>
+              {isEditingText ? (
+                <>
+                  <Button
+                    key="saveText"
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    onClick={saveTextPosition}
+                  >
+                    Save Text Position
+                  </Button>
+                  <Button
+                    key="resetText"
+                    icon={<UndoOutlined />}
+                    onClick={resetTextPosition}
+                    disabled={isDefaultText}
+                  >
+                    Reset Text
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  key="editText"
+                  icon={<EditOutlined />}
+                  onClick={() => setIsEditingText(true)}
+                >
+                  Position Text
                 </Button>
               )}
             </>
@@ -1567,7 +2025,7 @@ const SchoolResourceCategory = ({ user }) => {
         bodyStyle={{ 
           padding: 0, 
           height: '70vh', 
-          overflow: 'hidden', // UPDATED: Changed from 'auto' to 'hidden'
+          overflow: 'hidden',
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center'

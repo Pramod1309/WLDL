@@ -25,7 +25,7 @@ import io
 from database import (
     get_db, Admin, School, PasswordResetToken, ActivityLog, Resource, 
     Announcement, SupportTicket, ChatMessage, ResourceDownload, 
-    KnowledgeArticle, SchoolLogoPosition, engine, Base
+    KnowledgeArticle, SchoolLogoPosition, SchoolWatermarkText, engine, Base
 )
 from init_db import init_database
 
@@ -93,6 +93,7 @@ class SchoolCreate(BaseModel):
 class SchoolUpdate(BaseModel):
     school_name: Optional[str] = None
     email: Optional[EmailStr] = None
+    contact_number: Optional[str] = None  # ADDED
     password: Optional[str] = None
 
 class SchoolResponse(BaseModel):
@@ -100,6 +101,7 @@ class SchoolResponse(BaseModel):
     school_id: str
     school_name: str
     email: str
+    contact_number: Optional[str] = None  # ADDED
     logo_path: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -202,6 +204,19 @@ class LogoPosition(BaseModel):
     y_position: int  # Percentage from top (0-100)
     width: int  # Width percentage (5-50)
     opacity: float  # Opacity (0.1-1.0)
+
+class TextWatermarkPosition(BaseModel):
+    resource_id: str
+    # School name position
+    name_x: int
+    name_y: int
+    name_size: int
+    name_opacity: float
+    # Contact info position
+    contact_x: int
+    contact_y: int
+    contact_size: int
+    contact_opacity: float
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
@@ -341,6 +356,7 @@ async def create_school(
     school_id: str = Form(...),
     school_name: str = Form(...),
     email: str = Form(...),
+    contact_number: Optional[str] = Form(None),  # ADDED
     password: str = Form(...),
     logo: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
@@ -380,6 +396,7 @@ async def create_school(
         school_id=school_id,
         school_name=school_name,
         email=email,
+        contact_number=contact_number,  # ADDED
         password_hash=password_hash,
         logo_path=logo_path
     )
@@ -395,6 +412,7 @@ async def update_school(
     school_id: str,
     school_name: Optional[str] = Form(None),
     email: Optional[str] = Form(None),
+    contact_number: Optional[str] = Form(None),  # ADDED
     password: Optional[str] = Form(None),
     logo: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db)
@@ -423,6 +441,8 @@ async def update_school(
                 detail="Email already in use"
             )
         school.email = email
+    if contact_number is not None:  # ADDED
+        school.contact_number = contact_number
     if password:
         school.password_hash = get_password_hash(password)
     
@@ -1291,15 +1311,134 @@ async def reset_logo_position(
     
     return {"message": "Logo position reset to default"}
 
+# ==================== TEXT WATERMARK ROUTES ====================
+
+@api_router.post("/school/text-watermark")
+async def save_text_watermark_position(
+    school_id: str = Form(...),
+    resource_id: str = Form(...),
+    name_x: int = Form(...),
+    name_y: int = Form(...),
+    name_size: int = Form(...),
+    name_opacity: float = Form(...),
+    contact_x: int = Form(...),
+    contact_y: int = Form(...),
+    contact_size: int = Form(...),
+    contact_opacity: float = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Save or update text watermark position"""
+    # Check if resource exists
+    resource = db.query(Resource).filter(Resource.resource_id == resource_id).first()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    
+    # Check if school has access
+    if resource.uploaded_by_type == 'school' and resource.uploaded_by_id != school_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Validate values
+    if not (0 <= name_x <= 100) or not (0 <= name_y <= 100):
+        raise HTTPException(status_code=400, detail="Name position must be between 0 and 100")
+    if not (0 <= contact_x <= 100) or not (0 <= contact_y <= 100):
+        raise HTTPException(status_code=400, detail="Contact position must be between 0 and 100")
+    if not (8 <= name_size <= 40):
+        raise HTTPException(status_code=400, detail="Name size must be between 8 and 40")
+    if not (8 <= contact_size <= 20):
+        raise HTTPException(status_code=400, detail="Contact size must be between 8 and 20")
+    if not (0.1 <= name_opacity <= 1.0) or not (0.1 <= contact_opacity <= 1.0):
+        raise HTTPException(status_code=400, detail="Opacity must be between 0.1 and 1.0")
+    
+    print(f"Saving text watermark for school: {school_id}, resource: {resource_id}")
+    
+    # Check if position already exists
+    existing = db.query(SchoolWatermarkText).filter(
+        SchoolWatermarkText.school_id == school_id,
+        SchoolWatermarkText.resource_id == resource_id
+    ).first()
+    
+    if existing:
+        # Update existing
+        existing.name_x = name_x
+        existing.name_y = name_y
+        existing.name_size = name_size
+        existing.name_opacity = name_opacity
+        existing.contact_x = contact_x
+        existing.contact_y = contact_y
+        existing.contact_size = contact_size
+        existing.contact_opacity = contact_opacity
+        existing.updated_at = datetime.utcnow()
+        message = "Text watermark position updated"
+    else:
+        # Create new
+        new_text = SchoolWatermarkText(
+            school_id=school_id,
+            resource_id=resource_id,
+            name_x=name_x,
+            name_y=name_y,
+            name_size=name_size,
+            name_opacity=name_opacity,
+            contact_x=contact_x,
+            contact_y=contact_y,
+            contact_size=contact_size,
+            contact_opacity=contact_opacity
+        )
+        db.add(new_text)
+        message = "Text watermark position saved"
+    
+    db.commit()
+    return {"message": message, "status": "success"}
+
+@api_router.get("/school/text-watermark/{resource_id}")
+async def get_text_watermark_position(
+    school_id: str,
+    resource_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get saved text watermark position"""
+    text_position = db.query(SchoolWatermarkText).filter(
+        SchoolWatermarkText.school_id == school_id,
+        SchoolWatermarkText.resource_id == resource_id
+    ).first()
+    
+    if not text_position:
+        # Return defaults
+        return {
+            "name_x": 50,
+            "name_y": 25,  # Below logo
+            "name_size": 20,
+            "name_opacity": 0.8,
+            "contact_x": 50,
+            "contact_y": 90,  # Bottom center
+            "contact_size": 12,
+            "contact_opacity": 0.7,
+            "is_default": True
+        }
+    
+    return {
+        "name_x": text_position.name_x,
+        "name_y": text_position.name_y,
+        "name_size": text_position.name_size,
+        "name_opacity": text_position.name_opacity,
+        "contact_x": text_position.contact_x,
+        "contact_y": text_position.contact_y,
+        "contact_size": text_position.contact_size,
+        "contact_opacity": text_position.contact_opacity,
+        "is_default": False,
+        "updated_at": text_position.updated_at.isoformat() if text_position.updated_at else None
+    }
+
 # ==================== LOGO WATERMARK ROUTES ====================
 
-def add_logo_watermark(file_path, logo_path, logo_position, file_type):
-    """Add logo watermark to a file and return the watermarked file path"""
+def add_logo_watermark(file_path, logo_path, logo_position, file_type, school_info=None, text_position=None):
+    """Add logo and text watermark to a file and return the watermarked file path"""
     try:
         print(f"=== WATERMARKING FUNCTION ===")
         print(f"File: {file_path}")
         print(f"Logo: {logo_path}")
         print(f"File type: {file_type}")
+        print(f"School info: {school_info}")
+        print(f"Text position: {text_position}")
         
         # Create unique temp file path
         import tempfile
@@ -1316,10 +1455,10 @@ def add_logo_watermark(file_path, logo_path, logo_position, file_type):
         # Handle different file types
         if 'pdf' in file_type_lower or file_path.lower().endswith('.pdf'):
             print(f"Processing as PDF")
-            return add_logo_to_pdf(file_path, logo_path, logo_position, temp_file_path)
+            return add_logo_and_text_to_pdf(file_path, logo_path, logo_position, school_info, text_position, temp_file_path)
         elif any(img_type in file_type_lower for img_type in ['jpeg', 'jpg', 'png', 'gif', 'bmp', 'tiff', 'webp']):
             print(f"Processing as image")
-            return add_logo_to_image(file_path, logo_path, logo_position, temp_file_path)
+            return add_logo_and_text_to_image(file_path, logo_path, logo_position, school_info, text_position, temp_file_path)
         else:
             print(f"Unsupported file type for watermarking: {file_type}")
             return None
@@ -1330,32 +1469,35 @@ def add_logo_watermark(file_path, logo_path, logo_position, file_type):
         traceback.print_exc()
         return None
 
-def add_logo_to_pdf(pdf_path, logo_path, logo_position, output_path):
-    """Add logo to PDF"""
+def add_logo_and_text_to_pdf(pdf_path, logo_path, logo_position, school_info, text_position, output_path):
+    """Add logo and text to PDF"""
     try:
-        print(f"=== ADDING LOGO TO PDF ===")
+        print(f"=== ADDING LOGO AND TEXT TO PDF ===")
         print(f"PDF: {pdf_path}")
-        print(f"Logo: {logo_path}")
-        print(f"Position: x={logo_position.x_position}%, y={logo_position.y_position}%")
-        print(f"Size: width={logo_position.width}%, opacity={logo_position.opacity}")
+        if logo_path:
+            print(f"Logo: {logo_path}")
+        print(f"Logo Position: x={logo_position.x_position}%, y={logo_position.y_position}%")
+        print(f"School Info: {school_info}")
+        print(f"Text Position: {text_position}")
         
-        # Open PDF
         pdf_document = fitz.open(pdf_path)
         
-        # Open logo image
-        logo_img = Image.open(logo_path)
-        print(f"Original logo size: {logo_img.size}")
-        
-        # Convert logo to RGBA if needed
-        if logo_img.mode != 'RGBA':
-            logo_img = logo_img.convert('RGBA')
-        
-        # Apply opacity
-        if logo_position.opacity < 1.0:
-            alpha = logo_img.split()[3]
-            alpha = alpha.point(lambda p: p * logo_position.opacity)
-            logo_img.putalpha(alpha)
-            print(f"Applied opacity: {logo_position.opacity}")
+        # Open logo image if exists
+        logo_img = None
+        if logo_path and os.path.exists(logo_path):
+            logo_img = Image.open(logo_path)
+            print(f"Original logo size: {logo_img.size}")
+            
+            # Convert logo to RGBA if needed
+            if logo_img.mode != 'RGBA':
+                logo_img = logo_img.convert('RGBA')
+            
+            # Apply opacity
+            if logo_position.opacity < 1.0:
+                alpha = logo_img.split()[3]
+                alpha = alpha.point(lambda p: p * logo_position.opacity)
+                logo_img.putalpha(alpha)
+                print(f"Applied opacity: {logo_position.opacity}")
         
         # Get first page for dimensions
         first_page = pdf_document[0]
@@ -1363,46 +1505,80 @@ def add_logo_to_pdf(pdf_path, logo_path, logo_position, output_path):
         page_height = first_page.rect.height
         print(f"Page dimensions: {page_width}x{page_height}")
         
-        # Calculate logo size (width as percentage of page width)
-        logo_width_pixels = int(page_width * (logo_position.width / 100))
-        
-        # Maintain aspect ratio
-        aspect_ratio = logo_img.width / logo_img.height
-        logo_height_pixels = int(logo_width_pixels / aspect_ratio)
-        
-        print(f"Resized logo: {logo_width_pixels}x{logo_height_pixels}")
-        
-        # Resize logo
-        logo_img = logo_img.resize((logo_width_pixels, logo_height_pixels), Image.Resampling.LANCZOS)
-        
-        # Convert PIL image to bytes (PNG format)
-        logo_bytes = io.BytesIO()
-        logo_img.save(logo_bytes, format='PNG')
-        logo_bytes.seek(0)
-        
-        # Add logo to each page
-        for page_num in range(len(pdf_document)):
-            page = pdf_document[page_num]
+        # Add logo if exists
+        if logo_img:
+            # Calculate logo size
+            logo_width_pixels = int(page_width * (logo_position.width / 100))
+            aspect_ratio = logo_img.width / logo_img.height
+            logo_height_pixels = int(logo_width_pixels / aspect_ratio)
             
-            # Calculate position in points
-            x_position = page.rect.width * (logo_position.x_position / 100)
-            y_position = page.rect.height * (logo_position.y_position / 100)
+            print(f"Resized logo: {logo_width_pixels}x{logo_height_pixels}")
             
-            print(f"Page {page_num+1}: Logo at ({x_position}, {y_position})")
+            # Resize logo
+            logo_img = logo_img.resize((logo_width_pixels, logo_height_pixels), Image.Resampling.LANCZOS)
             
-            # Create rectangle for logo placement
-            rect = fitz.Rect(
-                x_position - (logo_width_pixels / 2),
-                y_position - (logo_height_pixels / 2),
-                x_position + (logo_width_pixels / 2),
-                y_position + (logo_height_pixels / 2)
-            )
+            # Convert to bytes
+            logo_bytes = io.BytesIO()
+            logo_img.save(logo_bytes, format='PNG')
+            logo_bytes.seek(0)
             
-            # Insert logo image
-            page.insert_image(
-                rect,
-                stream=logo_bytes.getvalue()
-            )
+            # Add logo to each page
+            for page_num in range(len(pdf_document)):
+                page = pdf_document[page_num]
+                x_position = page.rect.width * (logo_position.x_position / 100)
+                y_position = page.rect.height * (logo_position.y_position / 100)
+                
+                print(f"Page {page_num+1}: Logo at ({x_position}, {y_position})")
+                
+                rect = fitz.Rect(
+                    x_position - (logo_width_pixels / 2),
+                    y_position - (logo_height_pixels / 2),
+                    x_position + (logo_width_pixels / 2),
+                    y_position + (logo_height_pixels / 2)
+                )
+                
+                page.insert_image(rect, stream=logo_bytes.getvalue())
+        
+        # Add text watermarks if school info exists
+        if school_info and text_position:
+            for page_num in range(len(pdf_document)):
+                page = pdf_document[page_num]
+                
+                # School name
+                if school_info.get('school_name'):
+                    name_x = page.rect.width * (text_position['name_x'] / 100)
+                    name_y = page.rect.height * (text_position['name_y'] / 100)
+                    
+                    page.insert_text(
+                        fitz.Point(name_x, name_y),
+                        school_info['school_name'],
+                        fontsize=text_position['name_size'],
+                        color=(0, 0, 0, text_position['name_opacity']),
+                        align=1  # Center align
+                    )
+                    print(f"Page {page_num+1}: School name at ({name_x}, {name_y})")
+                
+                # Contact info
+                contact_text = ""
+                if school_info.get('email'):
+                    contact_text += f"✉ {school_info['email']}"
+                if school_info.get('contact_number'):
+                    if contact_text:
+                        contact_text += "   |   "
+                    contact_text += f"📞 {school_info['contact_number']}"
+                
+                if contact_text:
+                    contact_x = page.rect.width * (text_position['contact_x'] / 100)
+                    contact_y = page.rect.height * (text_position['contact_y'] / 100)
+                    
+                    page.insert_text(
+                        fitz.Point(contact_x, contact_y),
+                        contact_text,
+                        fontsize=text_position['contact_size'],
+                        color=(0, 0, 0, text_position['contact_opacity']),
+                        align=1  # Center align
+                    )
+                    print(f"Page {page_num+1}: Contact info at ({contact_x}, {contact_y})")
         
         # Save watermarked PDF
         pdf_document.save(output_path)
@@ -1415,77 +1591,154 @@ def add_logo_to_pdf(pdf_path, logo_path, logo_position, output_path):
         return output_path
         
     except Exception as e:
-        print(f"Error adding logo to PDF: {str(e)}")
+        print(f"Error adding logo and text to PDF: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
 
-def add_logo_to_image(image_path, logo_path, logo_position, output_path):
-    """Add logo to image"""
+def add_logo_and_text_to_image(image_path, logo_path, logo_position, school_info, text_position, output_path):
+    """Add logo and text to image"""
     try:
-        print(f"=== ADDING LOGO TO IMAGE ===")
+        print(f"=== ADDING LOGO AND TEXT TO IMAGE ===")
         print(f"Image: {image_path}")
-        print(f"Logo: {logo_path}")
+        if logo_path:
+            print(f"Logo: {logo_path}")
+        print(f"School Info: {school_info}")
+        print(f"Text Position: {text_position}")
         
         # Open base image
         base_img = Image.open(image_path).convert('RGBA')
         print(f"Base image size: {base_img.size}, mode: {base_img.mode}")
         
-        # Open logo image
-        logo_img = Image.open(logo_path).convert('RGBA')
-        print(f"Original logo size: {logo_img.size}, mode: {logo_img.mode}")
+        # Open logo image if exists
+        logo_img = None
+        if logo_path and os.path.exists(logo_path):
+            logo_img = Image.open(logo_path).convert('RGBA')
+            print(f"Original logo size: {logo_img.size}, mode: {logo_img.mode}")
+            
+            # Apply opacity
+            if logo_position.opacity < 1.0:
+                alpha = logo_img.split()[3]
+                alpha = alpha.point(lambda p: p * logo_position.opacity)
+                logo_img.putalpha(alpha)
+                print(f"Applied opacity: {logo_position.opacity}")
         
-        # Apply opacity
-        if logo_position.opacity < 1.0:
-            alpha = logo_img.split()[3]
-            alpha = alpha.point(lambda p: p * logo_position.opacity)
-            logo_img.putalpha(alpha)
-            print(f"Applied opacity: {logo_position.opacity}")
+        # Calculate logo size and position if logo exists
+        if logo_img:
+            base_width, base_height = base_img.size
+            logo_width = int(base_width * (logo_position.width / 100))
+            
+            # Maintain aspect ratio
+            aspect_ratio = logo_img.width / logo_img.height
+            logo_height = int(logo_width / aspect_ratio)
+            
+            print(f"Base image: {base_width}x{base_height}")
+            print(f"Logo size: {logo_width}x{logo_height}")
+            
+            # Resize logo
+            logo_img = logo_img.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
+            
+            # Calculate position
+            x_position = int(base_width * (logo_position.x_position / 100) - (logo_width / 2))
+            y_position = int(base_height * (logo_position.y_position / 100) - (logo_height / 2))
+            
+            # Ensure position is within bounds
+            x_position = max(0, min(base_width - logo_width, x_position))
+            y_position = max(0, min(base_height - logo_height, y_position))
+            
+            print(f"Logo position: {x_position}, {y_position}")
+            
+            # Create a transparent layer for the logo
+            logo_layer = Image.new('RGBA', base_img.size, (255, 255, 255, 0))
+            logo_layer.paste(logo_img, (x_position, y_position), logo_img)
+            
+            # Composite the logo
+            base_img = Image.alpha_composite(base_img, logo_layer)
         
-        # Calculate logo size
-        base_width, base_height = base_img.size
-        logo_width = int(base_width * (logo_position.width / 100))
-        
-        # Maintain aspect ratio
-        aspect_ratio = logo_img.width / logo_img.height
-        logo_height = int(logo_width / aspect_ratio)
-        
-        print(f"Base image: {base_width}x{base_height}")
-        print(f"Logo size: {logo_width}x{logo_height}")
-        
-        # Resize logo
-        logo_img = logo_img.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
-        
-        # Calculate position
-        x_position = int(base_width * (logo_position.x_position / 100) - (logo_width / 2))
-        y_position = int(base_height * (logo_position.y_position / 100) - (logo_height / 2))
-        
-        # Ensure position is within bounds
-        x_position = max(0, min(base_width - logo_width, x_position))
-        y_position = max(0, min(base_height - logo_height, y_position))
-        
-        print(f"Logo position: {x_position}, {y_position}")
-        
-        # Create a transparent layer for the logo
-        logo_layer = Image.new('RGBA', base_img.size, (255, 255, 255, 0))
-        logo_layer.paste(logo_img, (x_position, y_position), logo_img)
-        
-        # Composite the images
-        watermarked = Image.alpha_composite(base_img, logo_layer)
+        # Add text watermarks if school info exists
+        if school_info and text_position:
+            from PIL import ImageDraw, ImageFont
+            
+            # Create a drawing context
+            draw = ImageDraw.Draw(base_img)
+            
+            # Try to load a font
+            try:
+                # Try to use a system font
+                font_paths = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                    "/System/Library/Fonts/Helvetica.ttc",
+                    "C:/Windows/Fonts/arial.ttf"
+                ]
+                
+                name_font = None
+                contact_font = None
+                
+                for font_path in font_paths:
+                    if os.path.exists(font_path):
+                        try:
+                            name_font = ImageFont.truetype(font_path, text_position['name_size'])
+                            contact_font = ImageFont.truetype(font_path, text_position['contact_size'])
+                            break
+                        except:
+                            continue
+                
+                # Fallback to default font
+                if not name_font:
+                    name_font = ImageFont.load_default()
+                    name_font.size = text_position['name_size']
+                if not contact_font:
+                    contact_font = ImageFont.load_default()
+                    contact_font.size = text_position['contact_size']
+                
+                # School name
+                if school_info.get('school_name'):
+                    # Calculate text position
+                    name_x = int(base_img.width * (text_position['name_x'] / 100))
+                    name_y = int(base_img.height * (text_position['name_y'] / 100))
+                    
+                    # Draw text with opacity
+                    name_color = (0, 0, 0, int(255 * text_position['name_opacity']))
+                    draw.text((name_x, name_y), school_info['school_name'], 
+                             font=name_font, fill=name_color, anchor="mm")
+                    print(f"School name at ({name_x}, {name_y})")
+                
+                # Contact info
+                contact_text = ""
+                if school_info.get('email'):
+                    contact_text += f"✉ {school_info['email']}"
+                if school_info.get('contact_number'):
+                    if contact_text:
+                        contact_text += "   |   "
+                    contact_text += f"📞 {school_info['contact_number']}"
+                
+                if contact_text:
+                    # Calculate text position
+                    contact_x = int(base_img.width * (text_position['contact_x'] / 100))
+                    contact_y = int(base_img.height * (text_position['contact_y'] / 100))
+                    
+                    # Draw text with opacity
+                    contact_color = (0, 0, 0, int(255 * text_position['contact_opacity']))
+                    draw.text((contact_x, contact_y), contact_text,
+                             font=contact_font, fill=contact_color, anchor="mm")
+                    print(f"Contact info at ({contact_x}, {contact_y})")
+                    
+            except Exception as font_error:
+                print(f"Font error: {font_error}. Using default font.")
         
         # Convert back to original mode if needed
         if 'RGB' in base_img.mode:
-            watermarked = watermarked.convert('RGB')
+            base_img = base_img.convert('RGB')
         
         # Save watermarked image
-        watermarked.save(output_path, quality=95)
+        base_img.save(output_path, quality=95)
         
         print(f"Saved watermarked image to: {output_path}")
         print(f"File size: {os.path.getsize(output_path)} bytes")
         return output_path
         
     except Exception as e:
-        print(f"Error adding logo to image: {str(e)}")
+        print(f"Error adding logo and text to image: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
@@ -1497,7 +1750,7 @@ async def download_resource_with_logo(
     school_name: str = None,
     db: Session = Depends(get_db)
 ):
-    """Download a resource file with school logo watermark"""
+    """Download a resource file with school logo and text watermark"""
     try:
         print(f"=== DOWNLOAD WITH LOGO REQUEST ===")
         print(f"Resource ID: {resource_id}")
@@ -1527,6 +1780,22 @@ async def download_resource_with_logo(
             ).first()
             print(f"Logo position found: {logo_position is not None}")
         
+        # Get text watermark position for this school and resource
+        text_position = None
+        if school_id and resource_id:
+            text_position_response = await get_text_watermark_position(school_id, resource_id, db)
+            text_position = {
+                'name_x': text_position_response['name_x'],
+                'name_y': text_position_response['name_y'],
+                'name_size': text_position_response['name_size'],
+                'name_opacity': text_position_response['name_opacity'],
+                'contact_x': text_position_response['contact_x'],
+                'contact_y': text_position_response['contact_y'],
+                'contact_size': text_position_response['contact_size'],
+                'contact_opacity': text_position_response['contact_opacity']
+            }
+            print(f"Text position found: {text_position}")
+        
         # Get file path
         file_path = resource.file_path
         if file_path.startswith('/'):
@@ -1555,10 +1824,20 @@ async def download_resource_with_logo(
         
         print(f"Final file path: {full_file_path}")
         
-        # Check if we should add logo
-        add_logo = False
+        # Prepare school info for watermarking
+        school_info = None
+        if school:
+            school_info = {
+                'school_name': school.school_name,
+                'email': school.email,
+                'contact_number': school.contact_number
+            }
+        
+        # Check if we should add watermark
+        add_watermark = False
         logo_full_path = None
         
+        # Check for logo watermark
         if (school and school.logo_path and 
             logo_position and 
             resource.category != 'multimedia'):
@@ -1570,22 +1849,28 @@ async def download_resource_with_logo(
             logo_full_path = os.path.join(ROOT_DIR, logo_path)
             
             if os.path.exists(logo_full_path):
-                add_logo = True
+                add_watermark = True
                 print(f"Will add logo from: {logo_full_path}")
                 print(f"Logo position: x={logo_position.x_position}, y={logo_position.y_position}, "
                       f"width={logo_position.width}, opacity={logo_position.opacity}")
             else:
                 print(f"Logo not found at: {logo_full_path}")
-                add_logo = False
+        
+        # Check for text watermark
+        if school_info and text_position and resource.category != 'multimedia':
+            add_watermark = True
+            print(f"Will add text watermark with info: {school_info}")
         
         # Create watermarked file if needed
-        if add_logo:
+        if add_watermark:
             print(f"Creating watermarked version...")
             watermarked_file = add_logo_watermark(
                 full_file_path, 
-                logo_full_path, 
-                logo_position,
-                resource.file_type
+                logo_full_path if logo_full_path and os.path.exists(logo_full_path) else None,
+                logo_position if logo_position else {'x_position': 50, 'y_position': 10, 'width': 20, 'opacity': 0.7},
+                resource.file_type,
+                school_info,
+                text_position
             )
             
             if watermarked_file and os.path.exists(watermarked_file):
@@ -1724,6 +2009,23 @@ async def get_school_usage(school_id: str, db: Session = Depends(get_db)):
         "resources_uploaded": uploads_by_school,
         "storage_used_bytes": storage_used,
         "storage_used_mb": round(storage_used / (1024 * 1024), 2)
+    }
+
+# School info endpoint
+@api_router.get("/school/info/{school_id}")
+async def get_school_info(school_id: str, db: Session = Depends(get_db)):
+    """Get school information including contact number"""
+    school = db.query(School).filter(School.school_id == school_id).first()
+    
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+    
+    return {
+        "school_id": school.school_id,
+        "school_name": school.school_name,
+        "email": school.email,
+        "contact_number": school.contact_number,
+        "logo_path": school.logo_path
     }
 
 # Debug endpoint for logo positions
