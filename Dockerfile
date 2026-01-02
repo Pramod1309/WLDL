@@ -29,21 +29,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=off \
-    PIP_DISABLE_PIP_VERSION_CHECK=on \
-    PIP_DEFAULT_TIMEOUT=100 \
-    POETRY_VERSION=1.1.13 \
-    POETRY_HOME="/opt/poetry" \
-    POETRY_VIRTUALENVS_CREATE=false \
-    PATH="$POETRY_HOME/bin:$PATH"
+    PYTHONUNBUFFERED=1 
 
-# Install Poetry
-RUN pip install --no-cache-dir poetry==$POETRY_VERSION
-
-# Copy backend files
-COPY backend/poetry.lock backend/pyproject.toml /app/backend/
-COPY backend/requirements.txt /app/backend/
+# Copy only requirements.txt first to leverage Docker cache
+COPY backend/requirements.txt /app/backend/requirements.txt
 
 # Install Python dependencies
 WORKDIR /app/backend
