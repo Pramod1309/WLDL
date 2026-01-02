@@ -32,7 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PORT=8000
 
 # Copy backend requirements
 COPY backend/requirements.txt /app/backend/requirements.txt
@@ -50,8 +51,8 @@ COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 # Create necessary directories
 RUN mkdir -p /app/backend/uploads
 
-# Expose port
-EXPOSE 8000
+# Expose port (Railway uses PORT environment variable)
+EXPOSE $PORT
 
-# Start command
-CMD ["sh", "-c", "python init_db.py && python server.py"]
+# Start command - make sure to bind to 0.0.0.0
+CMD ["sh", "-c", "cd /app/backend && python init_db.py && uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}"]
