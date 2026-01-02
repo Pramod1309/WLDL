@@ -51,8 +51,17 @@ COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 # Create necessary directories
 RUN mkdir -p /app/backend/uploads
 
-# Expose port (Railway uses PORT environment variable)
+# Create a start.sh script for Railway
+RUN echo '#!/bin/bash\n\
+cd /app/backend\n\
+if [ -f "init_db.py" ]; then\n\
+    python init_db.py\n\
+fi\n\
+uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Expose port
 EXPOSE $PORT
 
-# Start command - make sure to bind to 0.0.0.0
-CMD ["sh", "-c", "cd /app/backend && python init_db.py && uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Use the start.sh script as entrypoint
+CMD ["/app/start.sh"]
