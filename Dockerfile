@@ -1,5 +1,5 @@
 # Use a multi-stage build for smaller image size
-FROM node:18 as frontend-builder
+FROM node:20 as frontend-builder
 
 # Set working directory
 WORKDIR /app
@@ -17,7 +17,7 @@ COPY frontend ./frontend
 RUN cd frontend && npm run build
 
 # Final stage
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
