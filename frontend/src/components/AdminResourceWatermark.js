@@ -233,17 +233,21 @@ const AdminResourceWatermark = () => {
         `${API}/admin/generate-watermark-preview`,
         {
           resource_id: selectedResource.resource_id,
-          school_id: previewSchool.school_id,
+          school_ids: [previewSchool.school_id],
           positions: watermarkPositions
         },
         { responseType: 'blob' }
       );
 
+      // Check if response is PDF or image
+      const contentType = response.headers['content-type'];
       const imageUrl = URL.createObjectURL(response.data);
       setPreviewImage(imageUrl);
+      
+      message.success('Preview generated successfully');
     } catch (error) {
       console.error('Error generating preview:', error);
-      message.error('Failed to generate preview');
+      message.error(error.response?.data?.detail || 'Failed to generate preview');
     } finally {
       setPreviewLoading(false);
     }
@@ -256,17 +260,21 @@ const AdminResourceWatermark = () => {
     }
 
     try {
-      await axios.post(`${API}/admin/save-watermark-template`, {
+      const response = await axios.post(`${API}/admin/save-watermark-template`, {
         admin_id: 'admin', // In real app, get from user context
         resource_id: selectedResource.resource_id,
         positions: watermarkPositions,
         is_for_all: selectAll
       });
 
-      message.success('Watermark template saved successfully');
+      if (response.data.status === 'success') {
+        message.success(response.data.message);
+      } else {
+        message.error('Failed to save template');
+      }
     } catch (error) {
       console.error('Error saving template:', error);
-      message.error('Failed to save template');
+      message.error(error.response?.data?.detail || 'Failed to save template');
     }
   };
 
