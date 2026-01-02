@@ -13,8 +13,8 @@ RUN cd frontend && npm install --legacy-peer-deps
 # Copy frontend source
 COPY frontend ./frontend
 
-# Build frontend
-RUN cd frontend && npm run build
+# Clean build directory if it exists and build frontend
+RUN cd frontend && rm -rf build && npm run build
 
 # Final stage
 FROM python:3.11-slim
