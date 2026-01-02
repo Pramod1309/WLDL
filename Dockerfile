@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy frontend files
 COPY frontend/package*.json ./frontend/
 
-# Install frontend dependencies
-RUN cd frontend && npm install
+# Install frontend dependencies with legacy peer deps
+RUN cd frontend && npm install --legacy-peer-deps
 
 # Copy frontend source
 COPY frontend ./frontend
@@ -29,9 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 
+    PYTHONUNBUFFERED=1
 
-# Copy only requirements.txt first to leverage Docker cache
+# Copy backend requirements
 COPY backend/requirements.txt /app/backend/requirements.txt
 
 # Install Python dependencies
