@@ -10,10 +10,10 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./deploy/nginx/nginx.conf
-      - ./deploy/nginx/conf.d/app.conf
+      - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx/conf.d/app.conf:/etc/nginx/conf.d/app.conf:ro
       - ./deploy/ssl:/etc/letsencrypt
-      - ./frontend/build:/usr/share/nginx/html
+      - ./frontend/build:/usr/share/nginx/html:ro
       - ./backend/uploads:/var/www/uploads
     depends_on:
       - backend
@@ -51,8 +51,8 @@ services:
   # Frontend Service - SIMPLIFIED
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
     container_name: wldl-frontend
     # Remove problematic volumes during build
     environment:
