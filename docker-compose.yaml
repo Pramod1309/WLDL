@@ -51,8 +51,8 @@ services:
   # Frontend Service - SIMPLIFIED
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: wldl-frontend
     # Remove problematic volumes during build
     environment:
