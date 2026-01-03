@@ -28,7 +28,8 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: wldl-backend
-    # Remove the volume that mounts backend to /app (causes issues with build)
+    ports:
+      - "5000:5000"
     volumes:
       - backend_uploads:/app/uploads
     environment:
@@ -38,26 +39,23 @@ services:
       - SECRET_KEY=${SECRET_KEY}
     depends_on:
       db:
-        condition: service_healthy
     restart: unless-stopped
     networks:
       - wldl-network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # Frontend Service - SIMPLIFIED
   frontend:
     build:
-      context: .
-      dockerfile: frontend/Dockerfile
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: wldl-frontend
-    # Remove problematic volumes during build
+    ports:
+      - "3000:3000"
     environment:
-      - REACT_APP_API_URL=/
+      - REACT_APP_API_URL=https:''backend:5000
       - NODE_ENV=production
+     depends_on:
+      - backend
     restart: unless-stopped
     networks:
       - wldl-network
