@@ -1,4 +1,5 @@
-version: '3.8'
+# Remove the version line as Hostinger suggests
+# version: '3.8'  # REMOVE THIS LINE
 
 services:
   # Nginx Reverse Proxy
@@ -27,29 +28,33 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: wldl-backend
+    # Remove the volume that mounts backend to /app (causes issues with build)
     volumes:
-      - ./backend:/app
-      - ./backend/uploads:/app/uploads
+      - backend_uploads:/app/uploads
     environment:
       - FLASK_APP=server.py
       - FLASK_ENV=production
       - DATABASE_URL=postgresql://wldl:${DB_PASSWORD}@db:5432/wldl_prod
       - SECRET_KEY=${SECRET_KEY}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - wldl-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Frontend Service
+  # Frontend Service - SIMPLIFIED
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: wldl-frontend
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    # Remove problematic volumes during build
     environment:
       - REACT_APP_API_URL=/
       - NODE_ENV=production
@@ -70,21 +75,27 @@ services:
     restart: unless-stopped
     networks:
       - wldl-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wldl"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Certbot for SSL
-  certbot:
-    image: certbot/certbot
-    container_name: certbot
-    volumes:
-      - ./deploy/ssl:/etc/letsencrypt
-      - ./deploy/letsencrypt:/var/lib/letsencrypt
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
-    networks:
-      - wldl-network
+  # Certbot for SSL - DISABLE FOR INITIAL DEPLOYMENT
+  # certbot:
+  #   image: certbot/certbot
+  #   container_name: certbot
+  #   volumes:
+  #     - ./deploy/ssl:/etc/letsencrypt
+  #     - ./deploy/letsencrypt:/var/lib/letsencrypt
+  #   entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+  #   networks:
+  #     - wldl-network
 
-# Volumes
+# Volumes - USE NAMED VOLUMES FOR PERSISTENCE
 volumes:
   postgres_data:
+  backend_uploads:
 
 # Networks
 networks:
