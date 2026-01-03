@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: wldl-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d
+      - ./deploy/ssl:/etc/letsencrypt
+      - ./frontend/build:/usr/share/nginx/html
+      - ./backend/uploads:/var/www/uploads
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    networks:
+      - wldl-network
+
+  # Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: wldl-backend
+    volumes:
+      - ./backend:/app
+      - ./backend/uploads:/app/uploads
+    environment:
+      - FLASK_APP=server.py
+      - FLASK_ENV=production
+      - DATABASE_URL=postgresql://wldl:${DB_PASSWORD}@db:5432/wldl_prod
+      - SECRET_KEY=${SECRET_KEY}
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - wldl-network
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: wldl-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=/
+      - NODE_ENV=production
+    restart: unless-stopped
+    networks:
+      - wldl-network
+
+  # Database Service
+  db:
+    image: postgres:13-alpine
+    container_name: wldl-db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=wldl
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=wldl_prod
+    restart: unless-stopped
+    networks:
+      - wldl-network
+
+  # Certbot for SSL
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./deploy/ssl:/etc/letsencrypt
+      - ./deploy/letsencrypt:/var/lib/letsencrypt
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - wldl-network
+
+# Volumes
+volumes:
+  postgres_data:
+
+# Networks
+networks:
+  wldl-network:
+    driver: bridge
