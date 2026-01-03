@@ -1,5 +1,5 @@
 services:
-  # Backend Service - START WITH THIS FIRST
+  # Backend Service
   backend:
     build:
       context: ./backend
@@ -8,19 +8,16 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - FLASK_APP=server.py
-      - FLASK_ENV=production
       - DATABASE_URL=postgresql://wldl:${DB_PASSWORD}@db:5432/wldl_prod
       - SECRET_KEY=${SECRET_KEY}
+      - FLASK_ENV=production
     volumes:
       - backend_uploads:/app/uploads
     depends_on:
       - db
     restart: unless-stopped
-    networks:
-      - wldl-network
 
-  # Frontend Service - UPDATED
+  # Frontend Service - SIMPLIFIED
   frontend:
     build:
       context: ./frontend
@@ -34,8 +31,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
-    networks:
-      - wldl-network
 
   # Database Service
   db:
@@ -48,29 +43,7 @@ services:
       - POSTGRES_PASSWORD=${DB_PASSWORD}
       - POSTGRES_DB=wldl_prod
     restart: unless-stopped
-    networks:
-      - wldl-network
-
-  # Nginx - ADD THIS LATER AFTER BASIC SETUP WORKS
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: wldl-nginx
-  #   ports:
-  #     - "80:80"
-  #   volumes:
-  #     - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-  #     - ./frontend/build:/usr/share/nginx/html:ro
-  #   depends_on:
-  #     - backend
-  #     - frontend
-  #   restart: unless-stopped
-  #   networks:
-  #     - wldl-network
 
 volumes:
   postgres_data:
   backend_uploads:
-
-networks:
-  wldl-network:
-    driver: bridge
