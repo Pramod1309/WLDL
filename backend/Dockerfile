@@ -18,10 +18,10 @@ RUN pip install gunicorn
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p uploads
+RUN mkdir -p uploads/images uploads/videos uploads/documents uploads/thumbnails
 
 # Expose the port the app runs on
 EXPOSE 5000
 
 # Command to run the application
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "server:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--threads", "2", "server:app"]
