@@ -10,6 +10,11 @@ from sqlalchemy import UniqueConstraint
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+if os.environ.get('FLASK_ENV') == 'production':
+    DATABASE_URL = f"postgresql://wldl:{os.environ.get('DB_PASSWORD')}@db:5432/wldl_prod"
+else:
+    DATABASE_URL = f"sqlite:///{ROOT_DIR}/wonder_learning.db"
+
 # Database Configuration - Using SQLite for now (can switch to MySQL later)
 DB_PATH = ROOT_DIR / "wonder_learning.db"
 DATABASE_URL = f"sqlite:///{DB_PATH}"
