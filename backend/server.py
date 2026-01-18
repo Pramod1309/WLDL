@@ -442,14 +442,11 @@ def add_watermark_to_pdf(pdf_path: str, school: School, positions: WatermarkPosi
 def create_preview_image(resource: Resource, school: School, positions: WatermarkPosition) -> bytes:
     """Create preview image for non-PDF resources"""
     try:
-        from PIL import Image, ImageDraw
-        
         # Create a simple preview image
         img = Image.new('RGB', (800, 600), color='white')
         draw = ImageDraw.Draw(img)
         
         # Draw resource info
-        from PIL import ImageFont
         try:
             font_large = ImageFont.truetype("arial.ttf", 24)
             font_medium = ImageFont.truetype("arial.ttf", 16)
@@ -537,69 +534,174 @@ def create_preview_image(resource: Resource, school: School, positions: Watermar
 
 @api_router.post("/admin/generate-watermark-preview")
 async def generate_watermark_preview(
-    request: BatchWatermarkRequest,
+    request: Dict[str, Any],
     db: Session = Depends(get_db)
 ):
     """Generate preview of watermarked resource for admin"""
     try:
-        print(f"Generating preview for resource: {request.resource_id}")
+        print(f"Generating preview with request: {request}")
+        
+        resource_id = request.get('resource_id')
+        school_ids = request.get('school_ids', [])
+        positions = request.get('positions', {})
+        
+        if not resource_id:
+            raise HTTPException(status_code=400, detail="Resource ID required")
         
         # Get resource
-        resource = db.query(Resource).filter(Resource.resource_id == request.resource_id).first()
+        resource = db.query(Resource).filter(Resource.resource_id == resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         
         # Get school for preview
         school = None
-        if request.school_ids == 'all':
+        if school_ids == 'all' or (isinstance(school_ids, list) and len(school_ids) == 0):
             school = db.query(School).first()
-        elif isinstance(request.school_ids, list) and len(request.school_ids) > 0:
-            school = db.query(School).filter(School.school_id == request.school_ids[0]).first()
+        elif isinstance(school_ids, list) and len(school_ids) > 0:
+            school = db.query(School).filter(School.school_id == school_ids[0]).first()
+        elif isinstance(school_ids, str) and school_ids != 'all':
+            school = db.query(School).filter(School.school_id == school_ids).first()
         
         if not school:
             raise HTTPException(status_code=404, detail="School not found")
         
-        print(f"Using school: {school.school_name}")
+        print(f"Using school: {school.school_name} for resource: {resource.name}")
+        print(f"File type: {resource.file_type}")
         
-        # Try to get the actual file
-        try:
-            file_path = get_full_file_path(resource.file_path)
-            print(f"File path: {file_path}")
+        # Get the actual file
+        file_path = get_full_file_path(resource.file_path)
+        print(f"File path: {file_path}")
+        
+        if not os.path.exists(file_path):
+            # Try alternative paths
+            if resource.file_path.startswith('/'):
+                file_path = resource.file_path[1:]
+                file_path = os.path.join(ROOT_DIR, file_path)
+                print(f"Trying alternative path: {file_path}")
             
-            # For PDF files, create actual watermarked version
-            if resource.file_type and 'pdf' in resource.file_type.lower():
-                watermarked_pdf = add_watermark_to_pdf(file_path, school, request.positions)
-                
-                if watermarked_pdf and os.path.exists(watermarked_pdf):
-                    # Read the watermarked PDF
-                    with open(watermarked_pdf, 'rb') as f:
-                        content = f.read()
-                    
-                    # Clean up temp file
-                    os.remove(watermarked_pdf)
-                    
-                    return Response(
-                        content=content,
-                        media_type="application/pdf",
-                        headers={
-                            "Content-Disposition": "inline; filename=\"preview.pdf\""
-                        }
-                    )
-            
-        except Exception as file_error:
-            print(f"File processing error: {file_error}")
-            # Fall back to generated preview image
+            if not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail="File not found")
         
-        # Generate preview image
-        preview_image = create_preview_image(resource, school, request.positions)
-        
-        return Response(
-            content=preview_image,
-            media_type="image/png",
-            headers={
-                "Content-Disposition": "inline; filename=\"preview.png\""
-            }
+        # Convert positions dict to WatermarkPosition object
+        watermark_positions = WatermarkPosition(
+            logo_x=positions.get('logo_x', 50),
+            logo_y=positions.get('logo_y', 10),
+            logo_width=positions.get('logo_width', 20),
+            logo_opacity=positions.get('logo_opacity', 0.7),
+            school_name_x=positions.get('school_name_x', 50),
+            school_name_y=positions.get('school_name_y', 20),
+            school_name_size=positions.get('school_name_size', 16),
+            school_name_opacity=positions.get('school_name_opacity', 0.9),
+            contact_x=positions.get('contact_x', 50),
+            contact_y=positions.get('contact_y', 90),
+            contact_size=positions.get('contact_size', 12),
+            contact_opacity=positions.get('contact_opacity', 0.8)
         )
+        
+        # Check file type and apply appropriate watermark
+        file_type_lower = resource.file_type.lower() if resource.file_type else ''
+        file_path_lower = file_path.lower()
+        
+        # For PDF files - apply actual watermark and return PDF
+        if 'pdf' in file_type_lower or file_path_lower.endswith('.pdf'):
+            print("Processing PDF for watermark preview")
+            
+            # Apply watermark to PDF
+            watermarked_pdf = add_watermark_to_pdf(file_path, school, watermark_positions)
+            
+            if watermarked_pdf and os.path.exists(watermarked_pdf):
+                # Read the watermarked PDF
+                with open(watermarked_pdf, 'rb') as f:
+                    content = f.read()
+                
+                # Clean up temp file
+                os.remove(watermarked_pdf)
+                
+                print(f"Returning watermarked PDF, size: {len(content)} bytes")
+                
+                return Response(
+                    content=content,
+                    media_type="application/pdf",
+                    headers={
+                        "Content-Disposition": "inline; filename=\"preview.pdf\"",
+                        "Cache-Control": "no-cache, no-store, must-revalidate"
+                    }
+                )
+        
+        # For image files - apply watermark and return image
+        elif any(img_type in file_type_lower for img_type in ['jpeg', 'jpg', 'png', 'gif', 'bmp', 'tiff', 'webp']):
+            print("Processing image for watermark preview")
+            
+            # Get school logo path
+            logo_path = get_school_logo_path(school)
+            
+            # Prepare school info for watermarking
+            school_info = {
+                'school_name': school.school_name,
+                'email': school.email,
+                'contact_number': school.contact_number
+            }
+            
+            # Create temp output path
+            temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            output_path = temp_file.name
+            temp_file.close()
+            
+            # Apply watermark to image
+            result = add_logo_and_text_to_image(
+                file_path,
+                logo_path,
+                watermark_positions,
+                resource.file_type,
+                school_info,
+                {
+                    'name_x': watermark_positions.school_name_x,
+                    'name_y': watermark_positions.school_name_y,
+                    'name_size': watermark_positions.school_name_size,
+                    'name_opacity': watermark_positions.school_name_opacity,
+                    'contact_x': watermark_positions.contact_x,
+                    'contact_y': watermark_positions.contact_y,
+                    'contact_size': watermark_positions.contact_size,
+                    'contact_opacity': watermark_positions.contact_opacity
+                },
+                output_path
+            )
+            
+            if result and os.path.exists(result):
+                with open(result, 'rb') as f:
+                    content = f.read()
+                
+                os.remove(result)
+                
+                print(f"Returning watermarked image, size: {len(content)} bytes")
+                
+                return Response(
+                    content=content,
+                    media_type="image/png",
+                    headers={
+                        "Content-Disposition": "inline; filename=\"preview.png\"",
+                        "Cache-Control": "no-cache, no-store, must-revalidate"
+                    }
+                )
+        
+        # For other file types - return the original file with note
+        else:
+            print(f"Returning original file for preview: {resource.file_type}")
+            
+            # Read original file
+            with open(file_path, 'rb') as f:
+                content = f.read()
+            
+            # Return original file with watermark note
+            return Response(
+                content=content,
+                media_type=resource.file_type or "application/octet-stream",
+                headers={
+                    "Content-Disposition": "inline; filename=\"preview\"",
+                    "X-Watermark-Note": "Watermark will be applied in final download",
+                    "Cache-Control": "no-cache, no-store, must-revalidate"
+                }
+            )
         
     except HTTPException:
         raise
@@ -608,7 +710,7 @@ async def generate_watermark_preview(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @api_router.post("/admin/save-watermark-template")
 async def save_watermark_template(
     request: SaveTemplateRequest,
@@ -675,74 +777,154 @@ async def save_watermark_template(
 
 @api_router.post("/admin/download-batch-watermarked")
 async def download_batch_watermarked(
-    request: BatchWatermarkRequest,
+    request: Dict[str, Any],
     db: Session = Depends(get_db)
 ):
     """Download multiple watermarked resources as ZIP"""
     try:
-        print(f"Batch download for resource: {request.resource_id}")
+        resource_id = request.get('resource_id')
+        school_ids = request.get('school_ids', [])
+        positions = request.get('positions', {})
+        
+        print(f"Batch download request: resource_id={resource_id}, school_ids={school_ids}")
+        
+        if not resource_id:
+            raise HTTPException(status_code=400, detail="Resource ID required")
         
         # Get resource
-        resource = db.query(Resource).filter(Resource.resource_id == request.resource_id).first()
+        resource = db.query(Resource).filter(Resource.resource_id == resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         
         # Get schools
         schools = []
-        if request.school_ids == 'all':
+        if school_ids == 'all':
             schools = db.query(School).all()
-        elif isinstance(request.school_ids, list):
-            schools = db.query(School).filter(School.school_id.in_(request.school_ids)).all()
+        elif isinstance(school_ids, list):
+            schools = db.query(School).filter(School.school_id.in_(school_ids)).all()
         
         if not schools:
             raise HTTPException(status_code=404, detail="No schools found")
         
-        print(f"Processing {len(schools)} schools")
+        print(f"Processing for {len(schools)} schools")
+        
+        # Get original file
+        file_path = get_full_file_path(resource.file_path)
+        print(f"Original file path: {file_path}")
+        
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Original file not found")
+        
+        # Convert positions dict to WatermarkPosition object
+        watermark_positions = WatermarkPosition(
+            logo_x=positions.get('logo_x', 50),
+            logo_y=positions.get('logo_y', 10),
+            logo_width=positions.get('logo_width', 20),
+            logo_opacity=positions.get('logo_opacity', 0.7),
+            school_name_x=positions.get('school_name_x', 50),
+            school_name_y=positions.get('school_name_y', 20),
+            school_name_size=positions.get('school_name_size', 16),
+            school_name_opacity=positions.get('school_name_opacity', 0.9),
+            contact_x=positions.get('contact_x', 50),
+            contact_y=positions.get('contact_y', 90),
+            contact_size=positions.get('contact_size', 12),
+            contact_opacity=positions.get('contact_opacity', 0.8)
+        )
         
         # Create temporary directory for watermarked files
         temp_dir = tempfile.mkdtemp()
-        zip_filename = f"{resource.name.replace(' ', '_')}_watermarked_schools.zip"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        zip_filename = f"{resource.name.replace(' ', '_')}_watermarked_{timestamp}.zip"
         zip_path = os.path.join(temp_dir, zip_filename)
         
         # Create ZIP file
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            processed_count = 0
             for i, school in enumerate(schools):
                 try:
                     print(f"Processing school {i+1}/{len(schools)}: {school.school_name}")
                     
-                    # Get original file
-                    file_path = get_full_file_path(resource.file_path)
+                    watermarked_file = None
+                    file_type_lower = resource.file_type.lower() if resource.file_type else ''
                     
-                    # Create watermarked version (only for PDFs for now)
-                    if resource.file_type and 'pdf' in resource.file_type.lower():
-                        watermarked_file = add_watermark_to_pdf(file_path, school, request.positions)
+                    # For PDFs
+                    if 'pdf' in file_type_lower or file_path.lower().endswith('.pdf'):
+                        print(f"Applying watermark to PDF for {school.school_name}")
+                        watermarked_file = add_watermark_to_pdf(file_path, school, watermark_positions)
+                    
+                    # For images
+                    elif any(img_type in file_type_lower for img_type in ['jpeg', 'jpg', 'png', 'gif', 'bmp', 'tiff', 'webp']):
+                        print(f"Applying watermark to image for {school.school_name}")
                         
-                        if watermarked_file and os.path.exists(watermarked_file):
-                            # Add to ZIP with school folder structure
-                            school_folder = school.school_name.replace('/', '_').replace('\\', '_')
-                            arcname = f"{school_folder}/{resource.name.replace(' ', '_')}.pdf"
-                            zipf.write(watermarked_file, arcname)
-                            
-                            # Clean up temp file
-                            os.remove(watermarked_file)
-                            print(f"Added to ZIP: {arcname}")
-                        else:
-                            print(f"Failed to watermark for school: {school.school_name}")
+                        # Get school info
+                        school_info = {
+                            'school_name': school.school_name,
+                            'email': school.email,
+                            'contact_number': school.contact_number
+                        }
+                        
+                        # Get logo path
+                        logo_path = get_school_logo_path(school)
+                        
+                        # Apply watermark
+                        watermarked_file = add_logo_and_text_to_image(
+                            file_path,
+                            logo_path,
+                            watermark_positions,
+                            resource.file_type,
+                            school_info,
+                            {
+                                'name_x': watermark_positions.school_name_x,
+                                'name_y': watermark_positions.school_name_y,
+                                'name_size': watermark_positions.school_name_size,
+                                'name_opacity': watermark_positions.school_name_opacity,
+                                'contact_x': watermark_positions.contact_x,
+                                'contact_y': watermark_positions.contact_y,
+                                'contact_size': watermark_positions.contact_size,
+                                'contact_opacity': watermark_positions.contact_opacity
+                            },
+                            None  # Will create temp file
+                        )
+                    
+                    # For other file types, copy original
                     else:
-                        print(f"Skipping non-PDF file for school: {school.school_name}")
-                        # For non-PDF files, add original
+                        print(f"Copying original file for {school.school_name}")
+                        watermarked_file = file_path
+                    
+                    # Add to ZIP if file exists
+                    if watermarked_file and os.path.exists(watermarked_file):
+                        # Create safe filename
                         school_folder = school.school_name.replace('/', '_').replace('\\', '_')
-                        file_extension = resource.file_type.split('/')[-1] if resource.file_type else 'file'
-                        arcname = f"{school_folder}/{resource.name.replace(' ', '_')}.{file_extension}"
-                        zipf.write(file_path, arcname)
-                
+                        file_extension = os.path.splitext(file_path)[1] or '.file'
+                        filename = f"{resource.name.replace(' ', '_')}_{school.school_name.replace(' ', '_')}_branded{file_extension}"
+                        arcname = f"{school_folder}/{filename}"
+                        
+                        zipf.write(watermarked_file, arcname)
+                        processed_count += 1
+                        
+                        # Clean up temp file if it's not the original
+                        if watermarked_file != file_path:
+                            try:
+                                os.remove(watermarked_file)
+                            except:
+                                pass
+                        
+                        print(f"Added to ZIP: {arcname}")
+                    
                 except Exception as e:
                     print(f"Error processing school {school.school_name}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
+        
+        if processed_count == 0:
+            raise HTTPException(status_code=500, detail="No files were processed successfully")
         
         # Read ZIP file
         with open(zip_path, 'rb') as f:
             zip_content = f.read()
+        
+        print(f"ZIP created successfully: {len(zip_content)} bytes, {processed_count} files")
         
         # Clean up
         try:
@@ -751,14 +933,13 @@ async def download_batch_watermarked(
         except:
             pass
         
-        print(f"ZIP created successfully: {len(zip_content)} bytes")
-        
         return Response(
             content=zip_content,
             media_type="application/zip",
             headers={
                 "Content-Disposition": f"attachment; filename={zip_filename}",
-                "Content-Type": "application/zip"
+                "Content-Type": "application/zip",
+                "Content-Length": str(len(zip_content))
             }
         )
         
@@ -769,6 +950,41 @@ async def download_batch_watermarked(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+    
+# Add this helper function for creating branded versions of non-image/PDF files:
+def create_branded_version(file_path: str, school: School, positions: WatermarkPosition) -> str:
+    """Create a branded version of non-image/PDF files"""
+    try:
+        # Create a simple text file with school info
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix='.txt', 
+            delete=False,
+            mode='w',
+            encoding='utf-8'
+        )
+        
+        # Add school branding info at the top
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as original:
+            content = original.read()
+        
+        branding_info = f"""
+================================================================
+                        {school.school_name}
+                        {school.email}
+                        {school.contact_number or ''}
+================================================================
+
+{content}
+"""
+        
+        temp_file.write(branding_info)
+        temp_file.close()
+        
+        return temp_file.name
+        
+    except Exception as e:
+        print(f"Error creating branded version: {e}")
+        return None
 
 @api_router.post("/admin/download-watermarked-resource")
 async def download_watermarked_resource(
@@ -2198,142 +2414,153 @@ def add_logo_and_text_to_pdf(pdf_path, logo_path, logo_position, school_info, te
         traceback.print_exc()
         return None
 
-def add_logo_and_text_to_image(image_path, logo_path, logo_position, school_info, text_position, output_path):
-    """Add logo and text to image"""
+def add_logo_and_text_to_image(
+    image_path: str, 
+    logo_path: str, 
+    positions: WatermarkPosition,
+    file_type: str,
+    school_info: Dict[str, str],
+    text_position: Dict[str, Any],
+    output_path: str = None
+) -> str:
+    """Add logo and text watermark to image"""
     try:
         print(f"=== ADDING LOGO AND TEXT TO IMAGE ===")
         print(f"Image: {image_path}")
-        if logo_path:
-            print(f"Logo: {logo_path}")
+        print(f"Logo: {logo_path}")
         print(f"School Info: {school_info}")
         print(f"Text Position: {text_position}")
         
         # Open base image
-        base_img = Image.open(image_path).convert('RGBA')
+        base_img = Image.open(image_path)
+        
+        # Convert to RGBA if not already
+        if base_img.mode != 'RGBA':
+            base_img = base_img.convert('RGBA')
+        
         print(f"Base image size: {base_img.size}, mode: {base_img.mode}")
         
-        # Open logo image if exists
-        logo_img = None
+        # Create a transparent layer for watermarks
+        watermark_layer = Image.new('RGBA', base_img.size, (255, 255, 255, 0))
+        
+        # Add logo if exists
         if logo_path and os.path.exists(logo_path):
-            logo_img = Image.open(logo_path).convert('RGBA')
-            print(f"Original logo size: {logo_img.size}, mode: {logo_img.mode}")
-            
-            # Apply opacity
-            if logo_position.opacity < 1.0:
-                alpha = logo_img.split()[3]
-                alpha = alpha.point(lambda p: p * logo_position.opacity)
-                logo_img.putalpha(alpha)
-                print(f"Applied opacity: {logo_position.opacity}")
-        
-        # Calculate logo size and position if logo exists
-        if logo_img:
-            base_width, base_height = base_img.size
-            logo_width = int(base_width * (logo_position.width / 100))
-            
-            # Maintain aspect ratio
-            aspect_ratio = logo_img.width / logo_img.height
-            logo_height = int(logo_width / aspect_ratio)
-            
-            print(f"Base image: {base_width}x{base_height}")
-            print(f"Logo size: {logo_width}x{logo_height}")
-            
-            # Resize logo
-            logo_img = logo_img.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
-            
-            # Calculate position
-            x_position = int(base_width * (logo_position.x_position / 100) - (logo_width / 2))
-            y_position = int(base_height * (logo_position.y_position / 100) - (logo_height / 2))
-            
-            # Ensure position is within bounds
-            x_position = max(0, min(base_width - logo_width, x_position))
-            y_position = max(0, min(base_height - logo_height, y_position))
-            
-            print(f"Logo position: {x_position}, {y_position}")
-            
-            # Create a transparent layer for the logo
-            logo_layer = Image.new('RGBA', base_img.size, (255, 255, 255, 0))
-            logo_layer.paste(logo_img, (x_position, y_position), logo_img)
-            
-            # Composite the logo
-            base_img = Image.alpha_composite(base_img, logo_layer)
-        
-        # Add text watermarks if school info exists
-        if school_info and text_position:
-            from PIL import ImageDraw, ImageFont
-            
-            # Create a drawing context
-            draw = ImageDraw.Draw(base_img)
-            
-            # Try to load a font
             try:
-                # Try to use a system font
-                font_paths = [
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                    "/System/Library/Fonts/Helvetica.ttc",
-                    "C:/Windows/Fonts/arial.ttf"
-                ]
+                logo_img = Image.open(logo_path)
+                if logo_img.mode != 'RGBA':
+                    logo_img = logo_img.convert('RGBA')
                 
-                name_font = None
-                contact_font = None
+                # Apply opacity
+                if positions.logo_opacity < 1.0:
+                    alpha = logo_img.split()[3]
+                    alpha = alpha.point(lambda p: p * positions.logo_opacity)
+                    logo_img.putalpha(alpha)
                 
-                for font_path in font_paths:
-                    if os.path.exists(font_path):
-                        try:
-                            name_font = ImageFont.truetype(font_path, text_position['name_size'])
-                            contact_font = ImageFont.truetype(font_path, text_position['contact_size'])
-                            break
-                        except:
-                            continue
+                # Calculate logo size and position
+                base_width, base_height = base_img.size
+                logo_width = int(base_width * (positions.logo_width / 100))
                 
-                # Fallback to default font
-                if not name_font:
-                    name_font = ImageFont.load_default()
-                    name_font.size = text_position['name_size']
-                if not contact_font:
-                    contact_font = ImageFont.load_default()
-                    contact_font.size = text_position['contact_size']
+                # Maintain aspect ratio
+                aspect_ratio = logo_img.width / logo_img.height
+                logo_height = int(logo_width / aspect_ratio)
                 
-                # School name
-                if school_info.get('school_name'):
-                    # Calculate text position
-                    name_x = int(base_img.width * (text_position['name_x'] / 100))
-                    name_y = int(base_img.height * (text_position['name_y'] / 100))
-                    
-                    # Draw text with opacity
-                    name_color = (0, 0, 0, int(255 * text_position['name_opacity']))
-                    draw.text((name_x, name_y), school_info['school_name'], 
-                             font=name_font, fill=name_color, anchor="mm")
-                    print(f"School name at ({name_x}, {name_y})")
+                print(f"Logo size: {logo_width}x{logo_height}")
                 
-                # Contact info
-                contact_text = ""
-                if school_info.get('email'):
-                    contact_text += f"✉ {school_info['email']}"
-                if school_info.get('contact_number'):
-                    if contact_text:
-                        contact_text += "   |   "
-                    contact_text += f"📞 {school_info['contact_number']}"
+                # Resize logo
+                logo_img = logo_img.resize((logo_width, logo_height), Image.Resampling.LANCZOS)
                 
-                if contact_text:
-                    # Calculate text position
-                    contact_x = int(base_img.width * (text_position['contact_x'] / 100))
-                    contact_y = int(base_img.height * (text_position['contact_y'] / 100))
-                    
-                    # Draw text with opacity
-                    contact_color = (0, 0, 0, int(255 * text_position['contact_opacity']))
-                    draw.text((contact_x, contact_y), contact_text,
-                             font=contact_font, fill=contact_color, anchor="mm")
-                    print(f"Contact info at ({contact_x}, {contact_y})")
-                    
-            except Exception as font_error:
-                print(f"Font error: {font_error}. Using default font.")
+                # Calculate position
+                x_position = int(base_width * (positions.logo_x / 100) - (logo_width / 2))
+                y_position = int(base_height * (positions.logo_y / 100) - (logo_height / 2))
+                
+                # Ensure position is within bounds
+                x_position = max(0, min(base_width - logo_width, x_position))
+                y_position = max(0, min(base_height - logo_height, y_position))
+                
+                print(f"Logo position: {x_position}, {y_position}")
+                
+                # Paste logo onto watermark layer
+                watermark_layer.paste(logo_img, (x_position, y_position), logo_img)
+                
+            except Exception as logo_error:
+                print(f"Error adding logo: {logo_error}")
+        
+        # Add text watermarks
+        from PIL import ImageDraw, ImageFont
+        
+        draw = ImageDraw.Draw(watermark_layer)
+        
+        # Try to load a font
+        try:
+            # Use default font
+            font_name = ImageFont.truetype("arial.ttf", text_position['name_size']) if os.name == 'nt' else ImageFont.load_default()
+            font_contact = ImageFont.truetype("arial.ttf", text_position['contact_size']) if os.name == 'nt' else ImageFont.load_default()
+        except:
+            font_name = ImageFont.load_default()
+            font_contact = ImageFont.load_default()
+        
+        # Add school name
+        if school_info.get('school_name'):
+            name_x = int(base_img.width * (text_position['name_x'] / 100))
+            name_y = int(base_img.height * (text_position['name_y'] / 100))
+            
+            # Calculate text size for centering
+            from PIL import ImageDraw
+            temp_draw = ImageDraw.Draw(Image.new('RGBA', (1, 1)))
+            bbox = temp_draw.textbbox((0, 0), school_info['school_name'], font=font_name)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            
+            name_x -= text_width // 2
+            name_y -= text_height // 2
+            
+            # Draw text with opacity
+            name_color = (0, 0, 0, int(255 * text_position['name_opacity']))
+            draw.text((name_x, name_y), school_info['school_name'], 
+                     font=font_name, fill=name_color)
+            print(f"School name at ({name_x}, {name_y})")
+        
+        # Add contact info
+        contact_lines = []
+        if school_info.get('email'):
+            contact_lines.append(f"Email: {school_info['email']}")
+        if school_info.get('contact_number'):
+            contact_lines.append(f"Phone: {school_info['contact_number']}")
+        
+        if contact_lines:
+            contact_text = "\n".join(contact_lines)
+            contact_x = int(base_img.width * (text_position['contact_x'] / 100))
+            contact_y = int(base_img.height * (text_position['contact_y'] / 100))
+            
+            # Calculate text size for centering
+            temp_draw = ImageDraw.Draw(Image.new('RGBA', (1, 1)))
+            bbox = temp_draw.multiline_textbbox((0, 0), contact_text, font=font_contact)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            
+            contact_x -= text_width // 2
+            contact_y -= text_height // 2
+            
+            # Draw text with opacity
+            contact_color = (0, 0, 0, int(255 * text_position['contact_opacity']))
+            draw.multiline_text((contact_x, contact_y), contact_text,
+                              font=font_contact, fill=contact_color, align='center')
+            print(f"Contact info at ({contact_x}, {contact_y})")
+        
+        # Combine base image with watermark layer
+        watermarked_img = Image.alpha_composite(base_img, watermark_layer)
         
         # Convert back to original mode if needed
         if 'RGB' in base_img.mode:
-            base_img = base_img.convert('RGB')
+            watermarked_img = watermarked_img.convert('RGB')
         
-        # Save watermarked image
-        base_img.save(output_path, quality=95)
+        # Save to output path or temp file
+        if not output_path:
+            temp_file = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            output_path = temp_file.name
+            temp_file.close()
+        
+        watermarked_img.save(output_path, quality=95)
         
         print(f"Saved watermarked image to: {output_path}")
         print(f"File size: {os.path.getsize(output_path)} bytes")
@@ -2371,32 +2598,8 @@ async def download_resource_with_logo(
         school = None
         if school_id:
             school = db.query(School).filter(School.school_id == school_id).first()
-            print(f"School found: {school is not None}")
-        
-        # Get logo position for this school and resource
-        logo_position = None
-        if school_id and resource_id:
-            logo_position = db.query(SchoolLogoPosition).filter(
-                SchoolLogoPosition.school_id == school_id,
-                SchoolLogoPosition.resource_id == resource_id
-            ).first()
-            print(f"Logo position found: {logo_position is not None}")
-        
-        # Get text watermark position for this school and resource
-        text_position = None
-        if school_id and resource_id:
-            text_position_response = await get_text_watermark_position(school_id, resource_id, db)
-            text_position = {
-                'name_x': text_position_response['name_x'],
-                'name_y': text_position_response['name_y'],
-                'name_size': text_position_response['name_size'],
-                'name_opacity': text_position_response['name_opacity'],
-                'contact_x': text_position_response['contact_x'],
-                'contact_y': text_position_response['contact_y'],
-                'contact_size': text_position_response['contact_size'],
-                'contact_opacity': text_position_response['contact_opacity']
-            }
-            print(f"Text position found: {text_position}")
+            if school:
+                print(f"School: {school.school_name}")
         
         # Get file path
         file_path = resource.file_path
@@ -2426,101 +2629,149 @@ async def download_resource_with_logo(
         
         print(f"Final file path: {full_file_path}")
         
-        # Prepare school info for watermarking
-        school_info = None
-        if school:
+        # Check if we should add watermark
+        should_add_watermark = False
+        watermarked_file = None
+        
+        if school and school_id and resource_id:
+            # Get logo position
+            logo_position_db = db.query(SchoolLogoPosition).filter(
+                SchoolLogoPosition.school_id == school_id,
+                SchoolLogoPosition.resource_id == resource_id
+            ).first()
+            
+            # Get text watermark position
+            text_position_db = db.query(SchoolWatermarkText).filter(
+                SchoolWatermarkText.school_id == school_id,
+                SchoolWatermarkText.resource_id == resource_id
+            ).first()
+            
+            # Prepare positions
+            logo_positions = None
+            text_positions = None
+            
+            # Use saved positions or defaults
+            if logo_position_db:
+                logo_positions = {
+                    'x_position': logo_position_db.x_position,
+                    'y_position': logo_position_db.y_position,
+                    'width': logo_position_db.width,
+                    'opacity': logo_position_db.opacity
+                }
+                should_add_watermark = True
+                print(f"Using saved logo position: {logo_positions}")
+            else:
+                # Default logo position
+                logo_positions = {
+                    'x_position': 50,
+                    'y_position': 10,
+                    'width': 20,
+                    'opacity': 0.7
+                }
+                print(f"Using default logo position: {logo_positions}")
+            
+            if text_position_db:
+                text_positions = {
+                    'name_x': text_position_db.name_x,
+                    'name_y': text_position_db.name_y,
+                    'name_size': text_position_db.name_size,
+                    'name_opacity': text_position_db.name_opacity,
+                    'contact_x': text_position_db.contact_x,
+                    'contact_y': text_position_db.contact_y,
+                    'contact_size': text_position_db.contact_size,
+                    'contact_opacity': text_position_db.contact_opacity
+                }
+                should_add_watermark = True
+                print(f"Using saved text position: {text_positions}")
+            else:
+                # Default text position
+                text_positions = {
+                    'name_x': 50,
+                    'name_y': 25,
+                    'name_size': 20,
+                    'name_opacity': 0.8,
+                    'contact_x': 50,
+                    'contact_y': 90,
+                    'contact_size': 12,
+                    'contact_opacity': 0.7
+                }
+                print(f"Using default text position: {text_positions}")
+            
+            # Get school logo path
+            logo_path = None
+            if school and school.logo_path:
+                logo_path = school.logo_path
+                if logo_path.startswith('/'):
+                    logo_path = logo_path[1:]
+                logo_full_path = os.path.join(ROOT_DIR, logo_path)
+                if os.path.exists(logo_full_path):
+                    logo_path = logo_full_path
+                    print(f"Logo found at: {logo_path}")
+                else:
+                    print(f"Logo not found at: {logo_full_path}")
+                    logo_path = None
+            
+            # Prepare school info
             school_info = {
                 'school_name': school.school_name,
                 'email': school.email,
                 'contact_number': school.contact_number
             }
-        
-        # Check if we should add watermark
-        add_watermark = False
-        logo_full_path = None
-        
-        # Check for logo watermark
-        if (school and school.logo_path and 
-            logo_position and 
-            resource.category != 'multimedia'):
             
-            logo_path = school.logo_path
-            if logo_path.startswith('/'):
-                logo_path = logo_path[1:]
-            
-            logo_full_path = os.path.join(ROOT_DIR, logo_path)
-            
-            if os.path.exists(logo_full_path):
-                add_watermark = True
-                print(f"Will add logo from: {logo_full_path}")
-                print(f"Logo position: x={logo_position.x_position}, y={logo_position.y_position}, "
-                      f"width={logo_position.width}, opacity={logo_position.opacity}")
-            else:
-                print(f"Logo not found at: {logo_full_path}")
-        
-        # Check for text watermark
-        if school_info and text_position and resource.category != 'multimedia':
-            add_watermark = True
-            print(f"Will add text watermark with info: {school_info}")
-        
-        # Create watermarked file if needed
-        if add_watermark:
-            print(f"Creating watermarked version...")
-            watermarked_file = add_logo_watermark(
-                full_file_path, 
-                logo_full_path if logo_full_path and os.path.exists(logo_full_path) else None,
-                logo_position if logo_position else {'x_position': 50, 'y_position': 10, 'width': 20, 'opacity': 0.7},
-                resource.file_type,
-                school_info,
-                text_position
+            # Create WatermarkPosition object
+            watermark_positions = WatermarkPosition(
+                logo_x=logo_positions['x_position'],
+                logo_y=logo_positions['y_position'],
+                logo_width=logo_positions['width'],
+                logo_opacity=logo_positions['opacity'],
+                school_name_x=text_positions['name_x'],
+                school_name_y=text_positions['name_y'],
+                school_name_size=text_positions['name_size'],
+                school_name_opacity=text_positions['name_opacity'],
+                contact_x=text_positions['contact_x'],
+                contact_y=text_positions['contact_y'],
+                contact_size=text_positions['contact_size'],
+                contact_opacity=text_positions['contact_opacity']
             )
             
-            if watermarked_file and os.path.exists(watermarked_file):
-                print(f"Watermarked file created: {watermarked_file}")
+            # Apply watermark based on file type
+            if should_add_watermark:
+                print(f"Applying watermark to file type: {resource.file_type}")
                 
-                # Log download
-                if school_id and school_name:
-                    download_log = ResourceDownload(
-                        resource_id=resource_id,
-                        school_id=school_id,
-                        school_name=school_name
+                file_type_lower = resource.file_type.lower() if resource.file_type else ''
+                
+                # For PDF files
+                if 'pdf' in file_type_lower or full_file_path.lower().endswith('.pdf'):
+                    print("Applying watermark to PDF")
+                    watermarked_file = add_watermark_to_pdf(full_file_path, school, watermark_positions)
+                
+                # For image files
+                elif any(img_type in file_type_lower for img_type in ['jpeg', 'jpg', 'png', 'gif', 'bmp', 'tiff', 'webp']):
+                    print("Applying watermark to image")
+                    watermarked_file = add_logo_and_text_to_image(
+                        full_file_path,
+                        logo_path,
+                        watermark_positions,
+                        resource.file_type,
+                        school_info,
+                        text_positions,
+                        None  # Will create temp file
                     )
-                    db.add(download_log)
-                    resource.download_count += 1
-                    db.commit()
                 
-                # Read watermarked file
-                with open(watermarked_file, 'rb') as f:
-                    file_content = f.read()
-                
-                # Clean up temp file
-                try:
-                    os.remove(watermarked_file)
-                except:
-                    pass
-                
-                # Return watermarked file
-                file_extension = resource.file_type.split('/')[-1] if resource.file_type else ''
-                download_filename = f"{resource.name.replace(' ', '_')}_branded"
-                if file_extension:
-                    download_filename += f".{file_extension}"
-                
-                print(f"Returning watermarked file: {download_filename}")
-                return Response(
-                    content=file_content,
-                    media_type=resource.file_type or 'application/octet-stream',
-                    headers={
-                        "Content-Disposition": f"attachment; filename=\"{download_filename}\"",
-                        "Content-Length": str(len(file_content))
-                    }
-                )
-            else:
-                print(f"Watermarking failed, falling back to original")
+                else:
+                    print(f"File type {resource.file_type} not supported for watermarking, using original")
         
-        # Fallback to original file (no watermark)
-        print(f"Using original file (no watermark)")
+        # Use watermarked file if created successfully
+        if watermarked_file and os.path.exists(watermarked_file):
+            print(f"Watermarked file created: {watermarked_file}")
+            final_file_path = watermarked_file
+            filename_suffix = "_branded"
+        else:
+            print(f"Using original file")
+            final_file_path = full_file_path
+            filename_suffix = ""
         
-        # Log download if school info is provided
+        # Log download
         if school_id and school_name:
             download_log = ResourceDownload(
                 resource_id=resource_id,
@@ -2531,19 +2782,35 @@ async def download_resource_with_logo(
             resource.download_count += 1
             db.commit()
         
-        # Determine download filename
-        file_extension = resource.file_type.split('/')[-1] if resource.file_type else ''
-        download_filename = f"{resource.name.replace(' ', '_')}"
-        if file_extension and not download_filename.endswith(f".{file_extension}"):
-            download_filename = f"{download_filename}.{file_extension}"
+        # Read file content
+        with open(final_file_path, 'rb') as f:
+            file_content = f.read()
         
-        # Return original file
-        return FileResponse(
-            path=full_file_path,
-            filename=download_filename,
+        # Clean up temp watermarked file if created
+        if watermarked_file and watermarked_file != full_file_path and os.path.exists(watermarked_file):
+            try:
+                os.remove(watermarked_file)
+            except:
+                pass
+        
+        # Determine download filename
+        file_extension = os.path.splitext(resource.name)[1]
+        if not file_extension:
+            if resource.file_type:
+                file_extension = "." + resource.file_type.split('/')[-1]
+            else:
+                file_extension = ".pdf"
+        
+        download_filename = f"{resource.name.replace(' ', '_')}{filename_suffix}{file_extension}"
+        
+        print(f"Returning file: {download_filename}, size: {len(file_content)} bytes")
+        
+        return Response(
+            content=file_content,
             media_type=resource.file_type or 'application/octet-stream',
             headers={
-                "Content-Disposition": f"attachment; filename=\"{download_filename}\""
+                "Content-Disposition": f"attachment; filename=\"{download_filename}\"",
+                "Content-Length": str(len(file_content))
             }
         )
         
@@ -2555,6 +2822,76 @@ async def download_resource_with_logo(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+    
+    
+@api_router.get("/debug/school-watermark-positions/{school_id}")
+async def debug_school_watermark_positions(
+    school_id: str,
+    resource_id: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Debug endpoint to check all watermark positions for a school"""
+    school = db.query(School).filter(School.school_id == school_id).first()
+    if not school:
+        raise HTTPException(status_code=404, detail="School not found")
+    
+    # Get all logo positions
+    if resource_id:
+        logo_positions = db.query(SchoolLogoPosition).filter(
+            SchoolLogoPosition.school_id == school_id,
+            SchoolLogoPosition.resource_id == resource_id
+        ).all()
+    else:
+        logo_positions = db.query(SchoolLogoPosition).filter(
+            SchoolLogoPosition.school_id == school_id
+        ).all()
+    
+    # Get all text positions
+    if resource_id:
+        text_positions = db.query(SchoolWatermarkText).filter(
+            SchoolWatermarkText.school_id == school_id,
+            SchoolWatermarkText.resource_id == resource_id
+        ).all()
+    else:
+        text_positions = db.query(SchoolWatermarkText).filter(
+            SchoolWatermarkText.school_id == school_id
+        ).all()
+    
+    result = {
+        "school": {
+            "school_id": school.school_id,
+            "school_name": school.school_name,
+            "email": school.email,
+            "contact_number": school.contact_number,
+            "has_logo": bool(school.logo_path)
+        },
+        "logo_positions": [
+            {
+                "resource_id": lp.resource_id,
+                "x_position": lp.x_position,
+                "y_position": lp.y_position,
+                "width": lp.width,
+                "opacity": lp.opacity
+            }
+            for lp in logo_positions
+        ],
+        "text_positions": [
+            {
+                "resource_id": tp.resource_id,
+                "name_x": tp.name_x,
+                "name_y": tp.name_y,
+                "name_size": tp.name_size,
+                "name_opacity": tp.name_opacity,
+                "contact_x": tp.contact_x,
+                "contact_y": tp.contact_y,
+                "contact_size": tp.contact_size,
+                "contact_opacity": tp.contact_opacity
+            }
+            for tp in text_positions
+        ]
+    }
+    
+    return result
 
 # ==================== ANALYTICS ROUTES ====================
 
@@ -2667,7 +3004,7 @@ app.include_router(api_router)
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://koshquest.in", "https://www.koshquest.in", "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2678,7 +3015,7 @@ app.add_middleware(
 @app.middleware("http")
 async def add_cors_header(request, call_next):
     response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "https://koshquest.in"
+    response.headers["Access-Control-Allow-Origin"] = "http://localhost:3000"
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"

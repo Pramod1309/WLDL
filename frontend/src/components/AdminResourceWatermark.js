@@ -96,6 +96,7 @@ const AdminResourceWatermark = () => {
   const [fullscreenPreview, setFullscreenPreview] = useState(false);
   const [previewFileType, setPreviewFileType] = useState(null);
   const [showWatermarkOverlay, setShowWatermarkOverlay] = useState(true);
+  const [previewUrl, setPreviewUrl] = useState(null);
   
   const previewContainerRef = useRef(null);
   const iframeRef = useRef(null);
@@ -220,167 +221,209 @@ const AdminResourceWatermark = () => {
     }
   };
 
+  // FIXED: Properly define generatePreview function
+  const generatePreview = async () => {
+    if (selectedResources.length === 0) {
+      message.warning('Please select at least one resource');
+      return;
+    }
+
+    if (selectedSchools.length === 0 && !selectAllSchools) {
+      message.warning('Please select at least one school');
+      return;
+    }
+
+    // For preview, take the first selected resource
+    const resource = resources.find(r => r.resource_id === selectedResources[0]);
+    if (!resource) {
+      message.warning('Selected resource not found');
+      return;
+    }
+
+    // Take the first selected school for preview
+    const schoolId = selectAllSchools 
+      ? schools[0]?.school_id 
+      : selectedSchools[0];
+    
+    if (!schoolId) {
+      message.warning('No school selected');
+      return;
+    }
+
+    setPreviewLoading(true);
+    
+    try {
+      const requestData = {
+        resource_id: resource.resource_id,
+        school_ids: [schoolId],
+        positions: watermarkPositions
+      };
+
+      console.log('Sending preview request:', requestData);
+
+      const response = await axios.post(
+        `${API}/admin/generate-watermark-preview`,
+        requestData,
+        {
+          responseType: 'blob',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      // Create object URL for the preview
+      const blob = new Blob([response.data], { 
+        type: response.headers['content-type'] || 'application/pdf' 
+      });
+      
+      // Revoke previous URL if exists
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      
+      const newPreviewUrl = URL.createObjectURL(blob);
+      setPreviewUrl(newPreviewUrl);
+      
+      // Determine file type for rendering
+      const contentType = response.headers['content-type'] || '';
+      setPreviewFileType(contentType.includes('image') ? 'image' : 
+                        contentType.includes('pdf') ? 'pdf' : 'other');
+      
+      // Also add to previews array for navigation
+      const school = schools.find(s => s.school_id === schoolId);
+      setPreviews([{
+        resourceId: resource.resource_id,
+        resource,
+        schoolId,
+        schoolName: school?.school_name || 'Unknown School',
+        blobUrl: newPreviewUrl,
+        isPdf: contentType.includes('pdf'),
+        isImage: contentType.includes('image'),
+        isVideo: contentType.includes('video'),
+        isFallback: false,
+        error: false,
+        loaded: true
+      }]);
+      
+      message.success('Preview generated successfully');
+      
+    } catch (error) {
+      console.error('Error generating preview:', error);
+      message.error(error.response?.data?.detail || 'Failed to generate preview');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  // FIXED: Properly define generateAllPreviews function
   const generateAllPreviews = async () => {
     if (selectedResources.length === 0) {
       message.warning('Please select at least one resource');
       return;
     }
 
-    // Get first school for preview (first selected or first in list)
-    let previewSchoolId = selectedSchools[0] || (schools.length > 0 ? schools[0].school_id : null);
-    if (!previewSchoolId) {
-      message.warning('Please select at least one school');
-      return;
-    }
-
-    const selectedSchool = schools.find(s => s.school_id === previewSchoolId);
-    setSelectedPreviewSchool(selectedSchool);
-
     setPreviewLoading(true);
-    const newPreviews = [];
-
+    
     try {
-      // Generate preview for each selected resource
-      for (let i = 0; i < selectedResources.length; i++) {
-        const resourceId = selectedResources[i];
+      const previewPromises = [];
+      
+      // For each selected resource, generate preview
+      for (const resourceId of selectedResources) {
         const resource = resources.find(r => r.resource_id === resourceId);
-        
         if (!resource) continue;
 
-        message.info(`Generating preview ${i + 1}/${selectedResources.length}: ${resource.name}`);
+        // Take first school for preview
+        const schoolId = selectAllSchools 
+          ? schools[0]?.school_id 
+          : selectedSchools[0];
+        
+        if (!schoolId) continue;
 
-        try {
-          // Use the WATERMARKED preview endpoint
-          const response = await axios.post(
+        previewPromises.push(
+          axios.post(
             `${API}/admin/generate-watermark-preview`,
             {
-              resource_id: resourceId,
-              school_ids: [previewSchoolId],
+              resource_id: resource.resource_id,
+              school_ids: [schoolId],
               positions: watermarkPositions
             },
             {
               responseType: 'blob',
-              timeout: 30000
+              headers: { 'Content-Type': 'application/json' }
             }
-          );
-
-          // Check content type
-          const contentType = response.headers['content-type'] || '';
-          
-          // Create blob URL
-          const blob = new Blob([response.data], { type: contentType });
-          const blobUrl = URL.createObjectURL(blob);
-          
-          // Determine file type
-          const isPdf = contentType.includes('pdf') || 
-                       resource.file_type?.toLowerCase().includes('pdf') ||
-                       resource.file_path?.toLowerCase().endsWith('.pdf');
-          const isImage = contentType.includes('image') || 
-                         resource.file_type?.toLowerCase().includes('image') ||
-                         ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].some(ext => 
-                           resource.file_path?.toLowerCase().endsWith(`.${ext}`));
-          const isVideo = contentType.includes('video') || 
-                         ['mp4', 'webm', 'ogg', 'mov', 'avi'].some(ext => 
-                           resource.file_path?.toLowerCase().endsWith(`.${ext}`));
-
-          newPreviews.push({
-            resourceId,
+          ).then(response => ({
+            resourceId: resource.resource_id,
             resource,
-            previewUrl: blobUrl,
-            fileType: contentType || resource.file_type,
-            isPdf,
-            isImage,
-            isVideo,
-            blobUrl: blobUrl,
-            type: isPdf ? 'pdf' : isImage ? 'image' : isVideo ? 'video' : 'file',
-            contentType: contentType,
-            loaded: true
-          });
-        } catch (error) {
-          console.error(`Error generating watermarked preview for resource ${resourceId}:`, error);
-          
-          // Try alternative: Use the regular preview endpoint
-          try {
-            const fallbackResponse = await axios.get(
-              `${API}/resources/${resourceId}/preview`,
-              { 
-                responseType: 'blob',
-                timeout: 30000
-              }
-            );
-            
-            const contentType = fallbackResponse.headers['content-type'] || resource.file_type;
-            const blob = new Blob([fallbackResponse.data], { 
-              type: contentType
-            });
-            const blobUrl = URL.createObjectURL(blob);
-            
-            const isPdf = contentType.includes('pdf') || resource.file_path?.toLowerCase().endsWith('.pdf');
-            const isImage = contentType.includes('image') || 
-                           ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].some(ext => 
-                             resource.file_path?.toLowerCase().endsWith(`.${ext}`));
-            const isVideo = contentType.includes('video') || 
-                           ['mp4', 'webm', 'ogg', 'mov', 'avi'].some(ext => 
-                             resource.file_path?.toLowerCase().endsWith(`.${ext}`));
-
-            newPreviews.push({
-              resourceId,
-              resource,
-              previewUrl: blobUrl,
-              fileType: contentType,
-              isPdf,
-              isImage,
-              isVideo,
-              blobUrl,
-              type: isPdf ? 'pdf' : isImage ? 'image' : isVideo ? 'video' : 'file',
-              contentType: contentType,
-              loaded: true,
-              isFallback: true,
-              error: false
-            });
-          } catch (fallbackError) {
-            console.error('Fallback also failed:', fallbackError);
-            newPreviews.push({
-              resourceId,
-              resource,
-              previewUrl: null,
-              fileType: resource.file_type,
-              error: true,
-              errorMessage: 'Failed to load preview. The file might be corrupted or unavailable.',
-              loaded: false
-            });
-          }
-        }
+            schoolId,
+            schoolName: schools.find(s => s.school_id === schoolId)?.school_name || 'Unknown School',
+            blob: response.data,
+            contentType: response.headers['content-type'] || 'application/pdf'
+          })).catch(error => ({
+            resourceId: resource.resource_id,
+            resource,
+            schoolId,
+            error: true,
+            errorMessage: error.response?.data?.detail || 'Failed to generate preview'
+          }))
+        );
       }
 
-      setPreviews(newPreviews);
+      const results = await Promise.all(previewPromises);
+      
+      // Process results
+      const processedPreviews = results.map(result => {
+        if (result.error) {
+          return {
+            resourceId: result.resourceId,
+            resource: result.resource,
+            schoolId: result.schoolId,
+            error: true,
+            errorMessage: result.errorMessage,
+            loaded: true
+          };
+        }
+
+        const blob = new Blob([result.blob], { 
+          type: result.contentType 
+        });
+        const blobUrl = URL.createObjectURL(blob);
+        
+        return {
+          resourceId: result.resourceId,
+          resource: result.resource,
+          schoolId: result.schoolId,
+          schoolName: result.schoolName,
+          blobUrl,
+          isPdf: result.contentType.includes('pdf'),
+          isImage: result.contentType.includes('image'),
+          isVideo: result.contentType.includes('video'),
+          isFallback: false,
+          error: false,
+          loaded: true
+        };
+      });
+
+      setPreviews(processedPreviews);
       setCurrentPreviewIndex(0);
-      message.success(`Generated ${newPreviews.filter(p => !p.error).length} preview(s)`);
+      
+      if (processedPreviews.some(p => p.error)) {
+        message.warning('Some previews failed to generate. Check individual previews for details.');
+      } else {
+        message.success(`Generated ${processedPreviews.length} preview(s) successfully`);
+      }
       
     } catch (error) {
-      console.error('Error generating previews:', error);
-      message.error('Failed to generate previews. Please try again.');
+      console.error('Error generating all previews:', error);
+      message.error('Failed to generate previews');
     } finally {
       setPreviewLoading(false);
     }
   };
 
-  const getFileIcon = (fileType, size = 24) => {
-    if (!fileType) return <FileOutlined style={{ fontSize: `${size}px`, color: '#8c8c8c' }} />;
-    
-    const type = fileType.toLowerCase();
-    if (type.includes('pdf')) return <FilePdfOutlined style={{ fontSize: `${size}px`, color: '#ff4d4f' }} />;
-    if (type.includes('word') || type.includes('doc')) return <FileWordOutlined style={{ fontSize: `${size}px`, color: '#1890ff' }} />;
-    if (type.includes('excel') || type.includes('xls')) return <FileExcelOutlined style={{ fontSize: `${size}px`, color: '#52c41a' }} />;
-    if (type.includes('powerpoint') || type.includes('ppt')) return <FilePptOutlined style={{ fontSize: `${size}px`, color: '#ffa940' }} />;
-    if (type.includes('image')) return <FileImageOutlined style={{ fontSize: `${size}px`, color: '#722ed1' }} />;
-    if (type.includes('video')) return <PlayCircleOutlined style={{ fontSize: `${size}px`, color: '#13c2c2' }} />;
-    if (type.includes('text') || type.includes('txt')) return <FileOutlined style={{ fontSize: `${size}px`, color: '#8c8c8c' }} />;
-    return <FileOutlined style={{ fontSize: `${size}px`, color: '#8c8c8c' }} />;
-  };
-
+  // FIXED: Properly define renderPreview function
   const renderPreview = () => {
-    if (previewLoading) {
+    if (previewLoading || previews.length === 0) {
       return (
         <div style={{ 
           display: 'flex', 
@@ -391,15 +434,25 @@ const AdminResourceWatermark = () => {
           color: '#666'
         }}>
           <Spin indicator={<LoadingOutlined style={{ fontSize: 48 }} spin />} />
-          <p style={{ marginTop: '16px' }}>Generating watermarked previews...</p>
-          <p style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
-            This may take a moment for large files
+          <p style={{ marginTop: '16px' }}>
+            {previewLoading ? 'Generating preview...' : 'No preview generated yet'}
           </p>
+          {previews.length === 0 && !previewLoading && (
+            <Button 
+              type="primary" 
+              icon={<EyeOutlined />} 
+              onClick={generatePreview}
+              style={{ marginTop: '16px' }}
+            >
+              Generate Preview
+            </Button>
+          )}
         </div>
       );
     }
 
-    if (previews.length === 0) {
+    const currentPreview = previews[currentPreviewIndex];
+    if (!currentPreview) {
       return (
         <div style={{ 
           display: 'flex', 
@@ -407,26 +460,14 @@ const AdminResourceWatermark = () => {
           justifyContent: 'center', 
           alignItems: 'center', 
           height: '500px',
-          color: '#999'
+          color: '#ff4d4f'
         }}>
-          <EyeOutlined style={{ fontSize: '64px', marginBottom: '16px', color: '#d9d9d9' }} />
-          <p style={{ fontSize: '16px', marginBottom: '8px' }}>No previews generated yet</p>
-          <p style={{ fontSize: '14px', color: '#666', textAlign: 'center', maxWidth: '400px' }}>
-            Select resources and schools, then click "Generate Preview" to see watermarked versions
-          </p>
-          <Button 
-            type="primary" 
-            onClick={generateAllPreviews}
-            style={{ marginTop: '16px' }}
-            disabled={selectedResources.length === 0}
-          >
-            Generate Preview Now
-          </Button>
+          <CloseOutlined style={{ fontSize: '48px', marginBottom: '16px' }} />
+          <p>Preview not found</p>
         </div>
       );
     }
 
-    const currentPreview = previews[currentPreviewIndex];
     if (currentPreview.error) {
       return (
         <div style={{ 
@@ -754,6 +795,20 @@ const AdminResourceWatermark = () => {
     if (currentPreviewIndex > 0) {
       setCurrentPreviewIndex(currentPreviewIndex - 1);
     }
+  };
+
+  const getFileIcon = (fileType, size = 24) => {
+    if (!fileType) return <FileOutlined style={{ fontSize: `${size}px` }} />;
+    
+    const type = fileType.toLowerCase();
+    if (type.includes('pdf')) return <FilePdfOutlined style={{ color: '#ff4d4f', fontSize: `${size}px` }} />;
+    if (type.includes('word') || type.includes('doc')) return <FileWordOutlined style={{ color: '#1890ff', fontSize: `${size}px` }} />;
+    if (type.includes('powerpoint') || type.includes('ppt')) return <FilePptOutlined style={{ color: '#ffa940', fontSize: `${size}px` }} />;
+    if (type.includes('excel') || type.includes('xls')) return <FileExcelOutlined style={{ color: '#52c41a', fontSize: `${size}px` }} />;
+    if (type.includes('image')) return <FileImageOutlined style={{ color: '#722ed1', fontSize: `${size}px` }} />;
+    if (type.includes('video')) return <PlayCircleOutlined style={{ color: '#13c2c2', fontSize: `${size}px` }} />;
+    
+    return <FileOutlined style={{ fontSize: `${size}px` }} />;
   };
 
   const saveWatermarkTemplate = async () => {

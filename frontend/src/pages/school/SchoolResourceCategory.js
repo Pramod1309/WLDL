@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Card, Table, Button, Space, Input, Select, Tag, Upload, Modal, Form, Row, Col, message, Badge, Tooltip
+  Card, Table, Button, Space, Input, Select, Tag, Upload, Modal, Form, Row, Col, message, Badge, Tooltip, Dropdown
 } from 'antd';
 import {
   SearchOutlined, DownloadOutlined, EyeOutlined,
@@ -11,7 +11,7 @@ import {
   LoadingOutlined, UploadOutlined, ClockCircleOutlined,
   EditOutlined, SaveOutlined, UndoOutlined, ExpandOutlined,
   MinusOutlined, PlusOutlined, EyeInvisibleOutlined,
-  MailOutlined, PhoneOutlined, UserOutlined
+  MailOutlined, PhoneOutlined, UserOutlined, DownOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -219,7 +219,7 @@ const TextOverlay = ({
   );
 };
 
-// LogoOverlay Component - UPDATED with containerRef prop
+// LogoOverlay Component
 const LogoOverlay = ({ 
   logoUrl, 
   logoPosition, 
@@ -331,7 +331,7 @@ const LogoOverlay = ({
 };
 
 const SchoolResourceCategory = ({ user }) => {
-  const { category } = useParams();
+  const { category: urlCategory } = useParams();
   const [resources, setResources] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -345,6 +345,8 @@ const SchoolResourceCategory = ({ user }) => {
   const [selectedClass, setSelectedClass] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [viewMode, setViewMode] = useState('list');
+  const [categoryFilter, setCategoryFilter] = useState(urlCategory || 'academic');
+  const [subCategoryFilter, setSubCategoryFilter] = useState('all');
   
   // Logo positioning states
   const [logoPosition, setLogoPosition] = useState({ x: 50, y: 10, width: 20, opacity: 0.7 });
@@ -385,56 +387,34 @@ const SchoolResourceCategory = ({ user }) => {
     };
   }, []);
   
-  // Get category titles and descriptions
-  const getCategoryInfo = () => {
-    const categories = {
-      'academic': {
-        title: 'Academic Resources',
-        description: 'Manage curriculum, lesson plans, worksheets, and other teaching materials'
-      },
-      'marketing': {
-        title: 'Marketing Materials',
-        description: 'Manage brochures, banners, and promotional content'
-      },
-      'administrative': {
-        title: 'Administrative Resources',
-        description: 'Manage forms, templates, and policy documents'
-      },
-      'training': {
-        title: 'Training Resources',
-        description: 'Manage teacher training materials and guides'
-      },
-      'event': {
-        title: 'Event & Celebration',
-        description: 'Manage event plans and celebration materials'
-      },
-      'multimedia': {
-        title: 'Multimedia Collection',
-        description: 'Manage videos, audio, and interactive content'
-      }
-    };
-    return categories[category] || { title: category, description: '' };
-  };
-
-  const categoryInfo = getCategoryInfo();
-
+  // Update categoryFilter when urlCategory changes
   useEffect(() => {
-    console.log(`Category changed to: ${category}`);
+    if (urlCategory) {
+      setCategoryFilter(urlCategory);
+    }
+  }, [urlCategory]);
+  
+  useEffect(() => {
+    console.log(`Category filter changed to: ${categoryFilter}, Sub-category: ${subCategoryFilter}`);
     fetchResources();
     fetchSchoolInfo();
-  }, [category, user.school_id]);
+  }, [categoryFilter, subCategoryFilter, user.school_id]);
 
   const fetchResources = async () => {
     setLoading(true);
     try {
-      console.log(`Fetching resources for category: ${category}, school_id: ${user.school_id}`);
-      const response = await axios.get(`${API}/school/resources`, {
-        params: {
-          category: category,
-          school_id: user.school_id
-        }
-      });
-      console.log(`API Response for ${category}:`, response.data.length, 'resources');
+      console.log(`Fetching resources for category filter: ${categoryFilter}, sub-category: ${subCategoryFilter}, school_id: ${user.school_id}`);
+      
+      // Build query parameters
+      const params = { school_id: user.school_id };
+      
+      if (categoryFilter !== 'all') {
+        params.category = categoryFilter;
+      }
+      
+      console.log('API params:', params);
+      const response = await axios.get(`${API}/school/resources`, { params });
+      console.log(`API Response:`, response.data.length, 'resources');
       
       // Format resources with proper URLs and mark school's own uploads
       const formattedResources = response.data.map((resource, index) => {
@@ -469,10 +449,10 @@ const SchoolResourceCategory = ({ user }) => {
         };
       });
       
-      console.log(`Formatted ${formattedResources.length} resources for category: ${category}`);
+      console.log(`Formatted ${formattedResources.length} resources for category: ${categoryFilter}, sub-category: ${subCategoryFilter}`);
       // Log the categories of fetched resources to verify filtering
       formattedResources.forEach(res => {
-        console.log(`Resource: ${res.name}, Category: ${res.category}, IsOwn: ${res.is_own_upload}`);
+        console.log(`Resource: ${res.name}, Category: ${res.category}, Sub-category: ${res.sub_category}, IsOwn: ${res.is_own_upload}`);
       });
       
       setResources(formattedResources);
@@ -513,9 +493,89 @@ const SchoolResourceCategory = ({ user }) => {
     }
   };
 
+  // Simple category menu items for dropdown
+  const categoryMenuItems = [
+    {
+      key: 'academic',
+      label: 'Academic Resources',
+      onClick: () => setCategoryFilter('academic')
+    },
+    {
+      key: 'marketing',
+      label: 'Marketing Materials',
+      onClick: () => setCategoryFilter('marketing')
+    },
+    {
+      key: 'administrative',
+      label: 'Administrative Resources',
+      onClick: () => setCategoryFilter('administrative')
+    },
+    {
+      key: 'training',
+      label: 'Training Resources',
+      onClick: () => setCategoryFilter('training')
+    },
+    {
+      key: 'event',
+      label: 'Event & Celebration',
+      onClick: () => setCategoryFilter('event')
+    },
+    {
+      key: 'multimedia',
+      label: 'Multimedia Collection',
+      onClick: () => setCategoryFilter('multimedia')
+    },
+    {
+      key: 'all',
+      label: 'All Categories',
+      onClick: () => setCategoryFilter('all')
+    }
+  ];
+
+  // Update handleUpload to include sub-category
+  const handleUpload = async () => {
+    if (fileList.length === 0) {
+      message.warning('Please select a file to upload');
+      return;
+    }
+
+    try {
+      const values = await form.validateFields();
+
+      const formData = new FormData();
+      formData.append('file', fileList[0].originFileObj);
+      formData.append('name', values.name);
+      formData.append('category', categoryFilter);
+      formData.append('sub_category', values.sub_category || '');
+      formData.append('school_id', user.school_id);
+      formData.append('school_name', user.name);
+      formData.append('description', values.description || '');
+      formData.append('class_level', values.class_level || '');
+      formData.append('tags', values.tags ? values.tags.join(',') : '');
+
+      setUploading(true);
+      const response = await axios.post(`${API}/school/resources/upload`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      message.success('Resource uploaded successfully! Waiting for admin approval.');
+      form.resetFields();
+      setFileList([]);
+      setIsModalVisible(false);
+      fetchResources();
+    } catch (error) {
+      console.error('Error uploading resource:', error);
+      message.error(error.response?.data?.detail || 'Failed to upload resource');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   // Fetch logo position for a resource
   const fetchLogoPosition = async (resourceId) => {
-    if (!resourceId || category === 'multimedia') return;
+    if (!resourceId || categoryFilter === 'multimedia') return;
     
     try {
       setPositionLoading(true);
@@ -555,7 +615,7 @@ const SchoolResourceCategory = ({ user }) => {
 
   // Fetch text position for a resource
   const fetchTextPosition = async (resourceId) => {
-    if (!resourceId || category === 'multimedia') return;
+    if (!resourceId || categoryFilter === 'multimedia') return;
     
     try {
       const response = await axios.get(`${API}/school/text-watermark/${resourceId}`, {
@@ -588,7 +648,7 @@ const SchoolResourceCategory = ({ user }) => {
 
   // Save logo position
   const saveLogoPosition = async () => {
-    if (!previewResource || category === 'multimedia') return;
+    if (!previewResource || categoryFilter === 'multimedia') return;
     
     try {
       // Round float values to integers as backend expects integers
@@ -634,7 +694,7 @@ const SchoolResourceCategory = ({ user }) => {
 
   // Save text position
   const saveTextPosition = async () => {
-    if (!previewResource || category === 'multimedia') return;
+    if (!previewResource || categoryFilter === 'multimedia') return;
     
     try {
       const formData = new FormData();
@@ -665,7 +725,7 @@ const SchoolResourceCategory = ({ user }) => {
 
   // Reset logo position to default
   const resetLogoPosition = async () => {
-    if (!previewResource || category === 'multimedia') return;
+    if (!previewResource || categoryFilter === 'multimedia') return;
     
     try {
       console.log('Resetting logo position for resource:', previewResource.resource_id);
@@ -686,7 +746,7 @@ const SchoolResourceCategory = ({ user }) => {
 
   // Reset text position to default
   const resetTextPosition = async () => {
-    if (!previewResource || category === 'multimedia') return;
+    if (!previewResource || categoryFilter === 'multimedia') return;
     
     try {
       console.log('Resetting text position for resource:', previewResource.resource_id);
@@ -783,45 +843,6 @@ const SchoolResourceCategory = ({ user }) => {
         ...prev,
         contact_opacity: Math.max(0.1, Math.min(1.0, prev.contact_opacity + change))
       }));
-    }
-  };
-
-  const handleUpload = async () => {
-    if (fileList.length === 0) {
-      message.warning('Please select a file to upload');
-      return;
-    }
-
-    try {
-      const values = await form.validateFields();
-
-      const formData = new FormData();
-      formData.append('file', fileList[0].originFileObj);
-      formData.append('name', values.name);
-      formData.append('category', category);
-      formData.append('school_id', user.school_id);
-      formData.append('school_name', user.name);
-      formData.append('description', values.description || '');
-      formData.append('class_level', values.class_level || '');
-      formData.append('tags', values.tags ? values.tags.join(',') : '');
-
-      setUploading(true);
-      const response = await axios.post(`${API}/school/resources/upload`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      message.success('Resource uploaded successfully! Waiting for admin approval.');
-      form.resetFields();
-      setFileList([]);
-      setIsModalVisible(false);
-      fetchResources(); // Refresh the list
-    } catch (error) {
-      console.error('Error uploading resource:', error);
-      message.error(error.response?.data?.detail || 'Failed to upload resource');
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -947,7 +968,7 @@ const SchoolResourceCategory = ({ user }) => {
     }
 
     // Fetch logo and text positions for this resource (except multimedia category)
-    if (category !== 'multimedia') {
+    if (categoryFilter !== 'multimedia') {
       await fetchLogoPosition(record.resource_id);
       await fetchTextPosition(record.resource_id);
     }
@@ -1025,7 +1046,7 @@ const SchoolResourceCategory = ({ user }) => {
               message.error('Failed to load PDF preview. Try downloading instead.');
             }}
           />
-          {category !== 'multimedia' && logoUrl && (
+          {categoryFilter !== 'multimedia' && logoUrl && (
             <LogoOverlay
               logoUrl={logoUrl}
               logoPosition={logoPosition}
@@ -1039,7 +1060,7 @@ const SchoolResourceCategory = ({ user }) => {
               containerRef={pdfContainerRef}
             />
           )}
-          {category !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
+          {categoryFilter !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
             <TextOverlay
               schoolInfo={schoolInfo}
               textPosition={textPosition}
@@ -1109,7 +1130,7 @@ const SchoolResourceCategory = ({ user }) => {
               }
             }}
           />
-          {category !== 'multimedia' && logoUrl && (
+          {categoryFilter !== 'multimedia' && logoUrl && (
             <LogoOverlay
               logoUrl={logoUrl}
               logoPosition={logoPosition}
@@ -1123,7 +1144,7 @@ const SchoolResourceCategory = ({ user }) => {
               containerRef={imageContainerRef}
             />
           )}
-          {category !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
+          {categoryFilter !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
             <TextOverlay
               schoolInfo={schoolInfo}
               textPosition={textPosition}
@@ -1246,7 +1267,7 @@ const SchoolResourceCategory = ({ user }) => {
               }
             }}
           />
-          {category !== 'multimedia' && logoUrl && (
+          {categoryFilter !== 'multimedia' && logoUrl && (
             <LogoOverlay
               logoUrl={logoUrl}
               logoPosition={logoPosition}
@@ -1260,7 +1281,7 @@ const SchoolResourceCategory = ({ user }) => {
               containerRef={docContainerRef}
             />
           )}
-          {category !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
+          {categoryFilter !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
             <TextOverlay
               schoolInfo={schoolInfo}
               textPosition={textPosition}
@@ -1321,6 +1342,7 @@ const SchoolResourceCategory = ({ user }) => {
       resource.tags?.toLowerCase().includes(searchText.toLowerCase());
     const matchesClass = selectedClass === 'all' || resource.class_level === selectedClass;
     const matchesStatus = selectedStatus === 'all' || resource.display_status === selectedStatus;
+    
     return matchesSearch && matchesClass && matchesStatus;
   });
 
@@ -1708,13 +1730,35 @@ const SchoolResourceCategory = ({ user }) => {
     return false;
   };
 
+  // Format category name for display
+  const getCategoryDisplayName = (category) => {
+    if (category === 'all') return 'All Resources';
+    return category.charAt(0).toUpperCase() + category.slice(1) + ' Resources';
+  };
+
+  // Get category description
+  const getCategoryDescription = (category) => {
+    const descriptions = {
+      'academic': 'Manage curriculum, lesson plans, worksheets, and other teaching materials',
+      'marketing': 'Manage brochures, banners, and promotional content',
+      'administrative': 'Manage forms, templates, and policy documents',
+      'training': 'Manage teacher training materials and guides',
+      'event': 'Manage event plans and celebration materials',
+      'multimedia': 'Manage videos, audio, and interactive content',
+      'all': 'Browse all resource categories'
+    };
+    return descriptions[category] || `Manage ${category} resources`;
+  };
+
   return (
     <div>
       <Card
         title={
           <div>
-            <h2 style={{ margin: 0 }}>{categoryInfo.title}</h2>
-            <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>{categoryInfo.description}</p>
+            <h2 style={{ margin: 0 }}>{getCategoryDisplayName(categoryFilter)}</h2>
+            <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>
+              {getCategoryDescription(categoryFilter)}
+            </p>
           </div>
         }
         extra={
@@ -1749,13 +1793,26 @@ const SchoolResourceCategory = ({ user }) => {
             <Select
               value={selectedStatus}
               onChange={setSelectedStatus}
-              style={{ width: 150 }}
+              style={{ width: 150, marginRight: 8 }}
               placeholder="Filter by status"
             >
               <Option value="all">All Status</Option>
               <Option value="approved">Approved</Option>
               <Option value="pending">Pending</Option>
             </Select>
+            
+            {/* Category Dropdown */}
+            <Dropdown
+              menu={{ items: categoryMenuItems }}
+              placement="bottomRight"
+              trigger={['click']}
+            >
+              <Button style={{ width: 200 }}>
+                {getCategoryDisplayName(categoryFilter)}
+                <DownOutlined style={{ marginLeft: '8px' }} />
+              </Button>
+            </Dropdown>
+            
             <Button
               type="primary"
               icon={<UploadOutlined />}
@@ -1786,7 +1843,9 @@ const SchoolResourceCategory = ({ user }) => {
           ) : (
             <div style={{ textAlign: 'center', padding: '40px' }}>
               <FileUnknownOutlined style={{ fontSize: '48px', color: '#d9d9d9', marginBottom: '16px' }} />
-              <p style={{ color: '#999' }}>No resources found in this category</p>
+              <p style={{ color: '#999' }}>
+                No resources found in this category
+              </p>
               <Button
                 type="primary"
                 onClick={() => setIsModalVisible(true)}
@@ -1918,7 +1977,6 @@ const SchoolResourceCategory = ({ user }) => {
         }
         open={isPreviewModalVisible}
         onCancel={() => {
-          // Pause video if playing
           if (previewResource?.file_type?.includes('video') && videoRefs.current[previewResource.resource_id]) {
             videoRefs.current[previewResource.resource_id].pause();
           }
@@ -1943,7 +2001,7 @@ const SchoolResourceCategory = ({ user }) => {
           >
             Close
           </Button>,
-          category !== 'multimedia' && logoUrl && (
+          categoryFilter !== 'multimedia' && logoUrl && (
             <>
               {isEditingLogo ? (
                 <>
@@ -1976,7 +2034,7 @@ const SchoolResourceCategory = ({ user }) => {
               )}
             </>
           ),
-          category !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
+          categoryFilter !== 'multimedia' && (schoolInfo.school_name || schoolInfo.email || schoolInfo.contact_number) && (
             <>
               {isEditingText ? (
                 <>

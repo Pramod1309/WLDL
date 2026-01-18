@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Card, Table, Button, Space, Input, Select, Tag, Upload, Modal, Form, Row, Col, message, Badge, Tooltip
+  Card, Table, Button, Space, Input, Select, Tag, Upload, Modal, Form, Row, Col, message, Badge, Tooltip, Dropdown
 } from 'antd';
 import {
   UploadOutlined, SearchOutlined, DownloadOutlined, DeleteOutlined, EyeOutlined,
   FilePdfOutlined, FileImageOutlined, FileWordOutlined, FilePptOutlined,
   FileZipOutlined, FileUnknownOutlined, FileExcelOutlined, VideoCameraOutlined,
   AudioOutlined, AppstoreOutlined, UnorderedListOutlined, FileTextOutlined,
-  LoadingOutlined, CheckOutlined, CloseOutlined
+  LoadingOutlined, CheckOutlined, CloseOutlined, DownOutlined
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -16,6 +16,105 @@ const API = `${BACKEND_URL}/api`;
 
 const { Option } = Select;
 const { TextArea } = Input;
+
+// Category definitions with descriptions
+const CATEGORY_CONFIG = {
+  'all': {
+    title: 'All Categories',
+    description: 'All resource categories',
+    subcategories: {}
+  },
+  'academic': {
+    title: 'Academic Resources',
+    description: 'Manage curriculum, lesson plans, worksheets, and other teaching materials',
+    subcategories: {
+      'all': 'All Academic',
+      'curriculum': 'Curriculum',
+      'lesson-plan': 'Lesson Plan',
+      'worksheet': 'Worksheet',
+      'activity-sheet': 'Activity Sheet',
+      'teaching-aid': 'Teaching Aid',
+      'assessment': 'Assessment',
+      'syllabus': 'Syllabus',
+      'study-material': 'Study Material'
+    }
+  },
+  'marketing': {
+    title: 'Marketing Materials',
+    description: 'Manage brochures, banners, and promotional content',
+    subcategories: {
+      'all': 'All Marketing',
+      'brochure': 'Brochure',
+      'banner': 'Banner',
+      'social-media': 'Social Media Post',
+      'flyer': 'Flyer',
+      'promotional-video': 'Promotional Video',
+      'email-template': 'Email Template',
+      'presentation': 'Presentation',
+      'advertisement': 'Advertisement'
+    }
+  },
+  'administrative': {
+    title: 'Administrative Resources',
+    description: 'Manage forms, templates, and policy documents',
+    subcategories: {
+      'all': 'All Administrative',
+      'form': 'Form',
+      'template': 'Template',
+      'policy': 'Policy Document',
+      'report': 'Report',
+      'certificate': 'Certificate',
+      'letter': 'Official Letter',
+      'agreement': 'Agreement',
+      'guideline': 'Guideline'
+    }
+  },
+  'training': {
+    title: 'Training Resources',
+    description: 'Manage teacher training materials and guides',
+    subcategories: {
+      'all': 'All Training',
+      'teacher-training': 'Teacher Training',
+      'workshop': 'Workshop Material',
+      'certification': 'Certification Program',
+      'skill-development': 'Skill Development',
+      'orientation': 'Orientation Material',
+      'manual': 'Training Manual',
+      'handbook': 'Handbook',
+      'online-course': 'Online Course'
+    }
+  },
+  'event': {
+    title: 'Event & Celebration',
+    description: 'Manage event plans and celebration materials',
+    subcategories: {
+      'all': 'All Events',
+      'annual-day': 'Annual Day',
+      'sports-day': 'Sports Day',
+      'cultural-event': 'Cultural Event',
+      'festival': 'Festival Celebration',
+      'parents-meeting': 'Parents Meeting',
+      'graduation': 'Graduation Ceremony',
+      'competition': 'Competition',
+      'celebration': 'Celebration Material'
+    }
+  },
+  'multimedia': {
+    title: 'Multimedia Collection',
+    description: 'Manage videos, audio, and interactive content',
+    subcategories: {
+      'all': 'All Multimedia',
+      'video': 'Video',
+      'audio': 'Audio',
+      'interactive': 'Interactive Content',
+      'animation': 'Animation',
+      'graphic': 'Graphic',
+      'photograph': 'Photograph',
+      'podcast': 'Podcast',
+      'virtual-tour': 'Virtual Tour'
+    }
+  }
+};
 
 const AdminResourceCategory = ({ category, title, description }) => {
   const [resources, setResources] = useState([]);
@@ -31,35 +130,42 @@ const AdminResourceCategory = ({ category, title, description }) => {
   const [searchText, setSearchText] = useState('');
   const [selectedClass, setSelectedClass] = useState('all');
   const [viewMode, setViewMode] = useState('list');
-  
+  const [categoryFilter, setCategoryFilter] = useState(category || 'all');
+  const [subCategoryFilter, setSubCategoryFilter] = useState('all');
   const iframeRef = useRef(null);
   const videoRefs = useRef({});
 
   useEffect(() => {
     fetchResources();
-  }, [category]);
+  }, [categoryFilter, subCategoryFilter]);
 
   const fetchResources = async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API}/admin/resources?category=${category}`);
+      // Build query parameters
+      const params = {};
       
-      // Ensure each resource has a unique key and correct file path
+      if (categoryFilter !== 'all') {
+        params.category = categoryFilter;
+      }
+      
+      // Add sub-category filter if not 'all'
+      if (subCategoryFilter !== 'all') {
+        params.sub_category = subCategoryFilter;
+      }
+      
+      console.log('Fetching resources with params:', params);
+      const response = await axios.get(`${API}/admin/resources`, { params });
+      
       const formattedResources = response.data.map((resource, index) => {
         let file_path = resource.file_path;
         
-        // Debug log
-        console.log(`Original file_path for ${resource.name}:`, file_path);
-        
-        // Fix file path - ensure it's a complete URL
         if (file_path) {
           if (file_path.startsWith('http')) {
             // Already a full URL
           } else if (file_path.startsWith('/')) {
-            // Path starting with /, prepend backend URL
             file_path = `${BACKEND_URL}${file_path}`;
           } else {
-            // Relative path, construct full URL
             if (file_path.includes('uploads/')) {
               file_path = `${BACKEND_URL}/${file_path}`;
             } else {
@@ -68,8 +174,6 @@ const AdminResourceCategory = ({ category, title, description }) => {
           }
         }
         
-        console.log(`Formatted file_path for ${resource.name}:`, file_path);
-        
         return {
           ...resource,
           key: resource.resource_id || resource.id || `resource-${index}`,
@@ -77,7 +181,6 @@ const AdminResourceCategory = ({ category, title, description }) => {
         };
       });
       
-      console.log('Formatted resources:', formattedResources);
       setResources(formattedResources);
     } catch (error) {
       console.error('Error fetching resources:', error);
@@ -86,6 +189,45 @@ const AdminResourceCategory = ({ category, title, description }) => {
       setLoading(false);
     }
   };
+
+  // Get current category info
+  const getCategoryInfo = () => {
+    return CATEGORY_CONFIG[categoryFilter] || { 
+      title: categoryFilter, 
+      description: '',
+      subcategories: {}
+    };
+  };
+
+  const categoryInfo = getCategoryInfo();
+
+  // Create main category filter dropdown items
+  const mainCategoryFilterItems = Object.entries(CATEGORY_CONFIG).map(([key, config]) => ({
+    key: key,
+    label: (
+      <div style={{ minWidth: '250px', padding: '8px 0' }}>
+        <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{config.title}</div>
+        <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+          {config.description}
+        </div>
+      </div>
+    ),
+    onClick: () => {
+      setCategoryFilter(key);
+      setSubCategoryFilter('all'); // Reset sub-category when main category changes
+    }
+  }));
+
+  // Create sub-category filter dropdown items
+  const subCategoryFilterItems = Object.entries(categoryInfo.subcategories || {}).map(([key, label]) => ({
+    key: key,
+    label: (
+      <div style={{ minWidth: '200px', padding: '6px 0' }}>
+        <div style={{ fontWeight: 'normal', fontSize: '14px' }}>{label}</div>
+      </div>
+    ),
+    onClick: () => setSubCategoryFilter(key)
+  }));
 
   const handleUpload = async () => {
     if (fileList.length === 0) {
@@ -99,7 +241,8 @@ const AdminResourceCategory = ({ category, title, description }) => {
       const formData = new FormData();
       formData.append('file', fileList[0].originFileObj);
       formData.append('name', values.name);
-      formData.append('category', category);
+      formData.append('category', categoryFilter);
+      formData.append('sub_category', values.sub_category || '');
       formData.append('description', values.description || '');
       formData.append('class_level', values.class_level || '');
       formData.append('tags', values.tags ? values.tags.join(',') : '');
@@ -686,7 +829,14 @@ const AdminResourceCategory = ({ category, title, description }) => {
       resource.tags?.toLowerCase().includes(searchText.toLowerCase());
     const matchesClass = selectedClass === 'all' || resource.class_level === selectedClass;
     const matchesStatus = statusFilter === 'all' || resource.approval_status === statusFilter;
-    return matchesSearch && matchesClass && matchesStatus;
+    
+    // Filter by sub-category
+    let matchesSubCategory = true;
+    if (subCategoryFilter !== 'all') {
+      matchesSubCategory = resource.sub_category === subCategoryFilter;
+    }
+    
+    return matchesSearch && matchesClass && matchesStatus && matchesSubCategory;
   });
 
   const getStatusTag = (status) => {
@@ -721,6 +871,11 @@ const AdminResourceCategory = ({ category, title, description }) => {
             {record.uploaded_by_type === 'school' && (
               <div style={{ fontSize: '12px', color: '#666' }}>
                 School: {record.uploaded_by_name || 'N/A'}
+              </div>
+            )}
+            {record.sub_category && (
+              <div style={{ fontSize: '11px', color: '#1890ff', marginTop: '2px' }}>
+                📁 {categoryInfo.subcategories[record.sub_category] || record.sub_category}
               </div>
             )}
           </div>
@@ -883,6 +1038,21 @@ const AdminResourceCategory = ({ category, title, description }) => {
                 }}>
                   {resource.file_type?.split('/').pop() || 'File'}
                 </div>
+                {resource.sub_category && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 8,
+                    left: 8,
+                    background: 'rgba(24, 144, 255, 0.8)',
+                    color: 'white',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    fontWeight: 'bold'
+                  }}>
+                    {categoryInfo.subcategories[resource.sub_category]?.substring(0, 12) || resource.sub_category.substring(0, 12)}
+                  </div>
+                )}
               </div>
             }
             actions={[
@@ -965,8 +1135,15 @@ const AdminResourceCategory = ({ category, title, description }) => {
       <Card
         title={
           <div>
-            <h2 style={{ margin: 0 }}>{title}</h2>
-            <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>{description}</p>
+            <h2 style={{ margin: 0 }}>{categoryInfo.title}</h2>
+            <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>
+              {categoryInfo.description}
+              {subCategoryFilter !== 'all' && (
+                <span style={{ marginLeft: '10px', color: '#1890ff', fontWeight: 'bold' }}>
+                  › {categoryInfo.subcategories[subCategoryFilter]}
+                </span>
+              )}
+            </p>
           </div>
         }
         extra={
@@ -1001,7 +1178,7 @@ const AdminResourceCategory = ({ category, title, description }) => {
             <Select
               value={statusFilter}
               onChange={setStatusFilter}
-              style={{ width: 150 }}
+              style={{ width: 150, marginRight: 8 }}
               placeholder="Filter by status"
             >
               <Option value="all">All Status</Option>
@@ -1009,6 +1186,33 @@ const AdminResourceCategory = ({ category, title, description }) => {
               <Option value="approved">Approved</Option>
               <Option value="rejected">Rejected</Option>
             </Select>
+            
+            {/* Main Category Filter */}
+            <Dropdown
+              menu={{ items: mainCategoryFilterItems }}
+              placement="bottomRight"
+              trigger={['click']}
+            >
+              <Button style={{ width: 150 }}>
+                {categoryInfo.title}
+                <DownOutlined style={{ marginLeft: '8px' }} />
+              </Button>
+            </Dropdown>
+            
+            {/* Sub-category Filter (only show if not "all" category) */}
+            {categoryFilter !== 'all' && Object.keys(categoryInfo.subcategories).length > 1 && (
+              <Dropdown
+                menu={{ items: subCategoryFilterItems }}
+                placement="bottomRight"
+                trigger={['click']}
+              >
+                <Button style={{ width: 150 }}>
+                  {categoryInfo.subcategories[subCategoryFilter] || 'All Sub-categories'}
+                  <DownOutlined style={{ marginLeft: '8px' }} />
+                </Button>
+              </Dropdown>
+            )}
+            
             <Button
               type="primary"
               icon={<UploadOutlined />}
@@ -1039,7 +1243,11 @@ const AdminResourceCategory = ({ category, title, description }) => {
           ) : (
             <div style={{ textAlign: 'center', padding: '40px' }}>
               <FileUnknownOutlined style={{ fontSize: '48px', color: '#d9d9d9', marginBottom: '16px' }} />
-              <p style={{ color: '#999' }}>No resources found</p>
+              <p style={{ color: '#999' }}>
+                {subCategoryFilter !== 'all' 
+                  ? `No resources found in ${categoryInfo.subcategories[subCategoryFilter]}`
+                  : 'No resources found'}
+              </p>
               <Button
                 type="primary"
                 onClick={() => setIsModalVisible(true)}
@@ -1088,6 +1296,23 @@ const AdminResourceCategory = ({ category, title, description }) => {
               <Button icon={<UploadOutlined />}>Select File (Max 100MB)</Button>
             </Upload>
           </Form.Item>
+
+          {/* Sub-category selection for non-"all" categories */}
+          {categoryFilter !== 'all' && (
+            <Form.Item
+              name="sub_category"
+              label="Sub-category"
+            >
+              <Select placeholder="Select sub-category (optional)" allowClear>
+                {Object.entries(categoryInfo.subcategories).map(([key, label]) => {
+                  if (key !== 'all') {
+                    return <Option key={key} value={key}>{label}</Option>;
+                  }
+                  return null;
+                })}
+              </Select>
+            </Form.Item>
+          )}
 
           <Form.Item
             name="class_level"
@@ -1166,6 +1391,11 @@ const AdminResourceCategory = ({ category, title, description }) => {
               {previewResource?.file_size < 1024 * 1024
                 ? ` ${(previewResource?.file_size / 1024).toFixed(1)} KB`
                 : ` ${(previewResource?.file_size / (1024 * 1024)).toFixed(2)} MB`}
+              {previewResource?.sub_category && (
+                <span style={{ marginLeft: '10px' }}>
+                  • 📁 {categoryInfo.subcategories[previewResource.sub_category]}
+                </span>
+              )}
             </div>
           </div>
         }
